@@ -115,3 +115,7 @@ Photos already in the folder are uploaded on the first run.
 
 - Black-and-white or very faded photos may be missed, since detection is colour-based. Use `--debug` to check.
 - Photos touching each other with no sleeve gap between them may come out as one image.
+
+## For Claude Code
+
+`.claude/skills/photoscanner-setup/` is an agent skill describing this whole setup (printer → Mac, watcher, Google Cloud/Photos) and the gotchas found along the way. Claude Code picks it up automatically when working in this repo.
