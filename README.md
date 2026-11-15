@@ -39,8 +39,40 @@ Options:
 | Option | What it does |
 |---|---|
 | `-o DIR` | Save photos to `DIR` instead of `<scans>/photos` |
-| `--keep` | Leave scans in place instead of moving them to `done/` |
+| `--keep` | Leave scans in place instead of moving them to `done/` (a hidden `.split_photos_done` file remembers which were split) |
 | `--debug` | Also save a copy of each page with red boxes around the photos found |
+| `--watch` | Keep running and split each new scan as it arrives |
+| `--interval N` | Seconds between checks in watch mode (default 5) |
+| `--install` | macOS: run watch mode in the background, now and at every login |
+| `--uninstall` | macOS: stop and remove the background watcher |
+
+## Watching the folder automatically
+
+```bash
+python3 split_photos.py ~/scans --watch
+```
+
+checks the folder every few seconds. A scan is split only once it has finished arriving (its size stopped changing), which matters when a scanner writes it over the network. A damaged file is reported once and retried only if it changes.
+
+To have that run all the time without a terminal open (macOS):
+
+```bash
+git clone https://github.com/ndipatri/photoScanner.git ~/photoScanner
+cd ~/photoScanner
+python3 split_photos.py ~/scans --install
+```
+
+This adds a LaunchAgent (`~/Library/LaunchAgents/com.photoscanner.watch.plist`) that starts the watcher immediately, restarts it if it stops, and starts it again at every login. Any other options you pass (`-o`, `--keep`, `--debug`, `--interval`) are kept. Output goes to `~/Library/Logs/photoScanner.log`:
+
+```bash
+tail -f ~/Library/Logs/photoScanner.log
+```
+
+Clone the repo somewhere permanent first — the agent runs the script from wherever it was installed. To stop it for good:
+
+```bash
+python3 split_photos.py --uninstall
+```
 
 ## Tips for scanning
 

@@ -7,7 +7,10 @@ different places from page to page. Slightly tilted photos are
 straightened.
 
 Usage:
-    python3 split_photos.py [INPUT ...] [-o OUTPUT_DIR]
+    python3 split_photos.py [INPUT ...] [-o OUTPUT_DIR] [--watch]
+
+With --watch it keeps running and splits each new scan as soon as it has
+finished arriving in the folder.
 
 INPUT can be PDFs, JPEG/PNG images, or folders of them
 (default: ~/scans). Output goes to OUTPUT_DIR (default: <input folder>/photos),
@@ -21,10 +24,12 @@ Needs: ImageMagick + Ghostscript (for PDFs), and Python packages
 numpy + opencv-python-headless.
 """
 import argparse
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -45,14 +50,16 @@ def load_page(path: Path, tmp: Path):
     """Return the page as a BGR image (first page only for PDFs)."""
     if path.suffix.lower() == ".pdf":
         png = tmp / (path.stem + ".png")
-        subprocess.run(
+        res = subprocess.run(
             ["magick", "-density", str(DPI), f"{path}[0]",
              "-background", "white", "-alpha", "remove", str(png)],
-            check=True)
+            capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError("not a readable PDF (incomplete or damaged?)")
         path = png
     img = cv2.imread(str(path))
     if img is None:
-        raise RuntimeError(f"could not read {path}")
+        raise RuntimeError("not a readable image")
     return img
 
 
@@ -132,6 +139,155 @@ def gather(inputs):
     return files
 
 
+def process(f: Path, args, tmp: Path):
+    """Split one scan into photos; move it to done/ unless --keep."""
+    out = Path(args.out).expanduser() if args.out else f.parent / "photos"
+    out.mkdir(parents=True, exist_ok=True)
+    img = load_page(f, tmp)
+    rects = find_photos(img)
+    stamp = scan_stamp(f)
+    names = []
+    for i, r in enumerate(rects, 1):
+        dest = unused_name(out, f"{stamp}_{i}", ".jpg")
+        cv2.imwrite(str(dest), crop_rect(img, r), [cv2.IMWRITE_JPEG_QUALITY, 95])
+        names.append(dest.name)
+    if args.debug:
+        dbg = img.copy()
+        for r in rects:
+            box = cv2.boxPoints(r).astype(np.int32)
+            cv2.drawContours(dbg, [box], 0, (0, 0, 255), 8)
+        cv2.imwrite(str(unused_name(out, f"{stamp}_boxes", ".jpg")), dbg)
+    moved = ""
+    if args.keep:
+        ledger_add(f)
+    else:
+        done = f.parent / "done"
+        done.mkdir(exist_ok=True)
+        target = unused_name(done, f.stem, f.suffix)
+        shutil.move(str(f), str(target))
+        moved = f", moved to done/{target.name}"
+    print(f"{f.name}: {len(rects)} photo(s) -> {', '.join(names) or 'none'}{moved}",
+          flush=True)
+    if not rects:
+        print("  (no photos found; try --debug to see why)", flush=True)
+
+
+# With --keep, scans stay in place, so remember which ones were split in a
+# small ledger file next to them (name, size and modification time).
+LEDGER = ".split_photos_done"
+
+
+def _ledger_key(f: Path) -> str:
+    st = f.stat()
+    return f"{f.name}\t{st.st_size}\t{int(st.st_mtime)}"
+
+
+def ledger_has(f: Path) -> bool:
+    ledger = f.parent / LEDGER
+    return ledger.exists() and _ledger_key(f) in ledger.read_text().splitlines()
+
+
+def ledger_add(f: Path):
+    with open(f.parent / LEDGER, "a") as fh:
+        fh.write(_ledger_key(f) + "\n")
+
+
+def pending(inputs, keep):
+    """Scans that still need splitting."""
+    files = gather(inputs)
+    return [f for f in files if not (keep and ledger_has(f))]
+
+
+def watch(args, tmp: Path):
+    """Keep checking the folder; split each new scan once it has finished
+    arriving (same size and time on two checks in a row)."""
+    last_seen = {}   # path -> (size, mtime) at previous check
+    failed = {}      # path -> (size, mtime) when it last failed
+    where = ", ".join(str(Path(p).expanduser()) for p in args.inputs)
+    print(f"Watching {where} every {args.interval:g}s. Press Ctrl-C to stop.",
+          flush=True)
+    while True:
+        current = {}
+        for f in pending(args.inputs, args.keep):
+            try:
+                st = f.stat()
+            except FileNotFoundError:
+                continue
+            current[f] = (st.st_size, st.st_mtime)
+        for f, sig in current.items():
+            if sig[0] == 0 or last_seen.get(f) != sig or failed.get(f) == sig:
+                continue  # empty, still being written, or already failed as-is
+            try:
+                process(f, args, tmp)
+                failed.pop(f, None)
+            except Exception as e:  # keep watching even if one scan is bad
+                failed[f] = sig
+                print(f"{f.name}: could not split ({e}); will retry if it changes",
+                      flush=True)
+        last_seen = current
+        time.sleep(args.interval)
+
+
+AGENT_LABEL = "com.photoscanner.watch"
+AGENT_PLIST = Path.home() / "Library/LaunchAgents" / f"{AGENT_LABEL}.plist"
+AGENT_LOG = Path.home() / "Library/Logs/photoScanner.log"
+
+
+def _launchctl(*cmd):
+    return subprocess.run(["launchctl", *cmd], capture_output=True, text=True)
+
+
+def install_agent(args):
+    """Install a macOS LaunchAgent that runs --watch at login and keeps it running."""
+    import plistlib
+    if sys.platform != "darwin":
+        sys.exit("--install is for macOS. On Linux, run --watch from a systemd user service.")
+    prog = [sys.executable, "-u", str(Path(__file__).resolve()),
+            *[str(Path(p).expanduser().resolve()) for p in args.inputs],
+            "--watch", "--interval", f"{args.interval:g}"]
+    if args.out:
+        prog += ["-o", str(Path(args.out).expanduser().resolve())]
+    if args.keep:
+        prog.append("--keep")
+    if args.debug:
+        prog.append("--debug")
+    # launchd starts with a bare PATH; include Homebrew so ImageMagick and
+    # Ghostscript are found.
+    path = ":".join(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
+                     "/usr/sbin", "/sbin"])
+    plist = {
+        "Label": AGENT_LABEL,
+        "ProgramArguments": prog,
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ThrottleInterval": 30,
+        "EnvironmentVariables": {"PATH": path},
+        "StandardOutPath": str(AGENT_LOG),
+        "StandardErrorPath": str(AGENT_LOG),
+    }
+    AGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
+    AGENT_LOG.parent.mkdir(parents=True, exist_ok=True)
+    domain = f"gui/{os.getuid()}"
+    _launchctl("bootout", f"{domain}/{AGENT_LABEL}")   # replace any old one
+    with open(AGENT_PLIST, "wb") as fh:
+        plistlib.dump(plist, fh)
+    res = _launchctl("bootstrap", domain, str(AGENT_PLIST))
+    if res.returncode != 0:
+        sys.exit(f"launchctl could not start it: {res.stderr.strip()}")
+    print(f"Installed. Watching {', '.join(prog[3:3 + len(args.inputs)])} "
+          f"now and at every login.\nLog: {AGENT_LOG}\n"
+          f"Stop and remove with: python3 {Path(__file__).name} --uninstall")
+
+
+def uninstall_agent():
+    _launchctl("bootout", f"gui/{os.getuid()}/{AGENT_LABEL}")
+    if AGENT_PLIST.exists():
+        AGENT_PLIST.unlink()
+        print("Uninstalled; the watcher is stopped and won't start at login.")
+    else:
+        print("Nothing installed.")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("inputs", nargs="*", default=["~/scans"])
@@ -139,41 +295,38 @@ def main():
     ap.add_argument("--debug", action="store_true",
                     help="also save <name>_boxes.jpg showing what was detected")
     ap.add_argument("--keep", action="store_true",
-                    help="don't move split scans into the done/ folder")
+                    help="don't move split scans into done/ (a ledger file "
+                         "remembers which were split)")
+    ap.add_argument("--watch", action="store_true",
+                    help="keep running and split new scans as they arrive")
+    ap.add_argument("--interval", type=float, default=5,
+                    help="seconds between checks in --watch mode (default 5)")
+    ap.add_argument("--install", action="store_true",
+                    help="macOS: run --watch in the background now and at every login")
+    ap.add_argument("--uninstall", action="store_true",
+                    help="macOS: stop and remove the background watcher")
     args = ap.parse_args()
 
-    files = gather(args.inputs)
-    if not files:
-        sys.exit("No new scans found.")
+    if args.uninstall:
+        return uninstall_agent()
+    if args.install:
+        return install_agent(args)
 
     with tempfile.TemporaryDirectory() as tmp:
+        if args.watch:
+            try:
+                watch(args, Path(tmp))
+            except KeyboardInterrupt:
+                print("\nStopped watching.")
+            return
+        files = pending(args.inputs, args.keep)
+        if not files:
+            sys.exit("No new scans found.")
         for f in files:
-            out = Path(args.out).expanduser() if args.out else f.parent / "photos"
-            out.mkdir(parents=True, exist_ok=True)
-            img = load_page(f, Path(tmp))
-            rects = find_photos(img)
-            stamp = scan_stamp(f)
-            names = []
-            for i, r in enumerate(rects, 1):
-                dest = unused_name(out, f"{stamp}_{i}", ".jpg")
-                cv2.imwrite(str(dest), crop_rect(img, r), [cv2.IMWRITE_JPEG_QUALITY, 95])
-                names.append(dest.name)
-            if args.debug:
-                dbg = img.copy()
-                for r in rects:
-                    box = cv2.boxPoints(r).astype(np.int32)
-                    cv2.drawContours(dbg, [box], 0, (0, 0, 255), 8)
-                cv2.imwrite(str(unused_name(out, f"{stamp}_boxes", ".jpg")), dbg)
-            moved = ""
-            if not args.keep:
-                done = f.parent / "done"
-                done.mkdir(exist_ok=True)
-                target = unused_name(done, f.stem, f.suffix)
-                shutil.move(str(f), str(target))
-                moved = f", moved to done/{target.name}"
-            print(f"{f.name}: {len(rects)} photo(s) -> {', '.join(names) or 'none'}{moved}")
-            if not rects:
-                print("  (no photos found; try --debug to see why)")
+            try:
+                process(f, args, Path(tmp))
+            except Exception as e:
+                print(f"{f.name}: could not split ({e})")
 
 
 if __name__ == "__main__":
