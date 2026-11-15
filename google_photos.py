@@ -80,12 +80,12 @@ def _save_token(creds):
     TOKEN_FILE.chmod(0o600)
 
 
-def credentials(interactive=False):
+def credentials(interactive=False, force=False):
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
 
     creds = None
-    if TOKEN_FILE.exists():
+    if TOKEN_FILE.exists() and not force:
         creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
     if creds and creds.valid:
         return creds
@@ -118,7 +118,9 @@ def credentials(interactive=False):
 
 
 def login():
-    credentials(interactive=True)
+    # Always do a fresh browser sign-in, e.g. after publishing the app,
+    # switching accounts, or when the old sign-in was revoked.
+    credentials(interactive=True, force=True)
     print(f"Signed in. Token saved to {TOKEN_FILE}")
 
 
