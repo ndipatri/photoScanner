@@ -319,10 +319,21 @@ def install_agent(args):
     AGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
     AGENT_LOG.parent.mkdir(parents=True, exist_ok=True)
     domain = f"gui/{os.getuid()}"
-    _launchctl("bootout", f"{domain}/{AGENT_LABEL}")   # replace any old one
+    # Replace any old one. bootout returns before the old watcher has fully
+    # stopped, and bootstrapping too soon fails with "Input/output error".
+    _launchctl("bootout", f"{domain}/{AGENT_LABEL}")
+    for _ in range(50):
+        if _launchctl("print", f"{domain}/{AGENT_LABEL}").returncode != 0:
+            break
+        time.sleep(0.2)
     with open(AGENT_PLIST, "wb") as fh:
         plistlib.dump(plist, fh)
     res = _launchctl("bootstrap", domain, str(AGENT_PLIST))
+    for _ in range(4):           # still racing on a slow machine: retry briefly
+        if res.returncode == 0:
+            break
+        time.sleep(1)
+        res = _launchctl("bootstrap", domain, str(AGENT_PLIST))
     if res.returncode != 0:
         sys.exit(f"launchctl could not start it: {res.stderr.strip()}")
     print(f"Installed. Watching {', '.join(prog[3:3 + len(args.inputs)])} "
