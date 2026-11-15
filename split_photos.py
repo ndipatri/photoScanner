@@ -198,15 +198,64 @@ def pending(inputs, keep):
     return [f for f in files if not (keep and ledger_has(f))]
 
 
+def out_dirs(args):
+    """Folders the photos are written to."""
+    if args.out:
+        return [Path(args.out).expanduser()]
+    dirs = []
+    for p in args.inputs:
+        p = Path(p).expanduser()
+        d = (p if p.is_dir() else p.parent) / "photos"
+        if d not in dirs:
+            dirs.append(d)
+    return dirs
+
+
+def upload(args):
+    """Upload any photos not yet in Google Photos. Raises on failure."""
+    import google_photos
+    for d in out_dirs(args):
+        if d.is_dir():
+            google_photos.upload_pending(d, args.album)
+
+
+class Uploader:
+    """Upload in watch mode, backing off after failures and printing each
+    distinct error only once so the log doesn't fill up."""
+    RETRY = [30, 60, 300, 900]
+
+    def __init__(self, args):
+        self.args, self.next_try, self.fails, self.last_err = args, 0.0, 0, None
+
+    def tick(self):
+        if not self.args.upload or time.time() < self.next_try:
+            return
+        try:
+            upload(self.args)
+            if self.last_err:
+                print("Google Photos upload working again.", flush=True)
+            self.fails, self.last_err, self.next_try = 0, None, 0.0
+        except Exception as e:
+            msg = str(e)
+            if msg != self.last_err:
+                print(f"Google Photos upload failed: {msg}", flush=True)
+            self.last_err = msg
+            self.next_try = time.time() + self.RETRY[min(self.fails, len(self.RETRY) - 1)]
+            self.fails += 1
+
+
 def watch(args, tmp: Path):
     """Keep checking the folder; split each new scan once it has finished
     arriving (same size and time on two checks in a row)."""
     last_seen = {}   # path -> (size, mtime) at previous check
     failed = {}      # path -> (size, mtime) when it last failed
+    uploader = Uploader(args)
     where = ", ".join(str(Path(p).expanduser()) for p in args.inputs)
-    print(f"Watching {where} every {args.interval:g}s. Press Ctrl-C to stop.",
+    extra = f', uploading to Google Photos album "{args.album}"' if args.upload else ""
+    print(f"Watching {where} every {args.interval:g}s{extra}. Press Ctrl-C to stop.",
           flush=True)
     while True:
+        uploader.tick()
         current = {}
         for f in pending(args.inputs, args.keep):
             try:
@@ -251,6 +300,8 @@ def install_agent(args):
         prog.append("--keep")
     if args.debug:
         prog.append("--debug")
+    if args.upload:
+        prog += ["--upload", "--album", args.album]
     # launchd starts with a bare PATH; include Homebrew so ImageMagick and
     # Ghostscript are found.
     path = ":".join(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
@@ -305,11 +356,23 @@ def main():
                     help="macOS: run --watch in the background now and at every login")
     ap.add_argument("--uninstall", action="store_true",
                     help="macOS: stop and remove the background watcher")
+    ap.add_argument("--upload", action="store_true",
+                    help="also upload new photos to Google Photos")
+    ap.add_argument("--album", default="Photo Album Scans",
+                    help='Google Photos album to upload into (default "Photo Album Scans")')
+    ap.add_argument("--photos-login", action="store_true",
+                    help="sign in to Google Photos (once, in your browser)")
     args = ap.parse_args()
 
+    if args.photos_login:
+        import google_photos
+        return google_photos.login()
     if args.uninstall:
         return uninstall_agent()
     if args.install:
+        if args.upload:
+            import google_photos
+            google_photos.credentials()   # fail now, not in the background
         return install_agent(args)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -321,12 +384,17 @@ def main():
             return
         files = pending(args.inputs, args.keep)
         if not files:
-            sys.exit("No new scans found.")
+            print("No new scans found.")
         for f in files:
             try:
                 process(f, args, Path(tmp))
             except Exception as e:
                 print(f"{f.name}: could not split ({e})")
+        if args.upload:
+            try:
+                upload(args)
+            except Exception as e:
+                sys.exit(f"Google Photos upload failed: {e}")
 
 
 if __name__ == "__main__":

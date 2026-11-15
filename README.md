@@ -45,6 +45,9 @@ Options:
 | `--interval N` | Seconds between checks in watch mode (default 5) |
 | `--install` | macOS: run watch mode in the background, now and at every login |
 | `--uninstall` | macOS: stop and remove the background watcher |
+| `--upload` | Also upload photos to Google Photos (see below) |
+| `--album NAME` | Google Photos album to use (default "Photo Album Scans") |
+| `--photos-login` | Sign in to Google Photos once |
 
 ## Watching the folder automatically
 
@@ -73,6 +76,35 @@ Clone the repo somewhere permanent first — the agent runs the script from wher
 ```bash
 python3 split_photos.py --uninstall
 ```
+
+## Uploading to Google Photos
+
+With `--upload`, every photo is also added to a Google Photos album (default "Photo Album Scans"; change it with `--album NAME`). The script only asks for Google's *append-only* permission: it can add photos and create its own album, but can't see, change or delete anything else in your library. A hidden `.uploaded_to_google_photos` file in the photos folder remembers what's been uploaded, so nothing goes up twice and failed uploads are retried.
+
+### One-time Google Cloud setup
+
+Google requires your own (free) API credentials:
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create a project, e.g. `photoScanner`.
+2. **APIs & Services → Library**: enable **Photos Library API**.
+3. **Google Auth Platform → Branding** (OAuth consent screen): app name `photoScanner`, your email as support and developer contact; audience **External**.
+4. **Audience**: click **Publish app** so it's "In production". (In "Testing", Google expires the sign-in every 7 days. You'll see an "unverified app" warning when signing in — that's expected for a personal app.)
+5. **Data Access**: add the scope `https://www.googleapis.com/auth/photoslibrary.appendonly`.
+6. **Clients → Create client**: type **Desktop app**. Download the JSON and save it as `~/.config/photoScanner/client_secret.json`.
+
+Then sign in once (opens your browser):
+
+```bash
+python3 split_photos.py --photos-login
+```
+
+and include `--upload` when running or installing:
+
+```bash
+python3 split_photos.py ~/scans --upload --install
+```
+
+Photos already in the folder are uploaded on the first run.
 
 ## Tips for scanning
 
