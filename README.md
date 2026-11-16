@@ -23,6 +23,25 @@ Everything runs on your Mac; the only place photos are sent is your own Google a
 - A flatbed scanner that can save PDFs (or JPEG/PNG/TIFF) into a folder on the Mac. A network printer's "Scan to Network Folder" works best: you never have to touch the Mac.
 - A Google account, and a free Google Cloud project for the Photos upload. Setting that up takes about 10 minutes, once.
 
+## Set it up with an AI agent (recommended)
+
+This repo includes an **agent skill**, [`.agents/skills/photoscanner-setup/`](.agents/skills/photoscanner-setup/SKILL.md). It gives an AI coding agent everything it needs to set up the whole system, troubleshoot it, or extend it:
+
+- installing the tools
+- sharing the scan folder and setting up the printer
+- the Google Cloud project, consent screen and sign-in
+- the background service
+- the non-obvious problems hit on a real setup: a firewall blocking file sharing, Google's 7-day sign-in expiry, an unreliable home DNS, and more
+
+Open this repo in an agent that supports skills (for example [Claude Code](https://claude.com/claude-code)) and ask:
+
+> Set up photoScanner on this Mac so my album scans end up in Google Photos.
+
+The agent works through the steps below and pauses for the things only you should do: typing passwords, changing macOS security settings, agreeing to Google's terms, and approving the sign-in in your browser.
+
+- **Claude Code** finds the skill automatically through the `.claude/skills` link.
+- **Other agents:** point them at `.agents/skills/photoscanner-setup/SKILL.md`.
+
 ## Setup
 
 ### 1. Install
@@ -156,6 +175,15 @@ The script finds the photos fresh on every page instead of cutting at fixed posi
 
 See [PRIVACY.md](PRIVACY.md) for what the app can and can't access.
 
-## For Claude Code
+## Agent skill layout
 
-`.claude/skills/photoscanner-setup/` is an agent skill that describes this whole setup: printer → Mac, the splitter and watcher, and the Google Cloud and Photos configuration, along with the gotchas found along the way. Claude Code picks it up automatically when working in this repo.
+```
+.agents/skills/photoscanner-setup/
+├── SKILL.md                      # overview, splitter, watcher, Google upload, troubleshooting
+└── references/
+    ├── google-cloud.md           # step-by-step Cloud console setup and its traps
+    └── printer-and-mac.md        # printer login, SMB sharing, firewall, scan settings
+.claude/skills/photoscanner-setup -> ../../.agents/skills/photoscanner-setup   (link for Claude Code)
+```
+
+If you change how setup works, update the skill along with the README, so agents and people get the same instructions.
