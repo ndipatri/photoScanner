@@ -26,6 +26,7 @@ numpy + opencv-python-headless.
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,30 +38,81 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-DPI = 300                 # resolution PDFs are rendered at
+DPI = 600                 # fallback resolution for PDFs that must be rendered
+MIN_DPI = 300             # lower-resolution scans are enlarged to this first
 DETECT_WIDTH = 1200       # pages are shrunk to this width to find photos
 SAT_MIN = 25              # sleeve saturation is ~0-15; photos are higher
 DARK_MAX = 150            # very dark pixels count as photo even if grey
 MIN_AREA_FRAC = 0.02      # ignore blobs smaller than 2% of the page
 MIN_FILL = 0.80           # blob must fill most of its rectangle
-INSET_PX = 6              # trim this many px (full-res) off each edge
+INSET_IN = 0.02           # trim this much (inches) off each edge of a photo
 EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 
 
+page_dpi = DPI             # resolution of the page loaded last (set by load_page)
+
+
+def _pdf_jpeg(path: Path):
+    """The scanner's own image, when the PDF is just one JPEG (as HP scans are).
+
+    Using it directly keeps the full scan resolution and avoids decoding,
+    resampling and re-rendering the page. Returns (image, dpi) or None if the
+    PDF is anything more complicated, in which case it is rendered instead.
+    """
+    d = path.read_bytes()
+    if (len(re.findall(rb"/Subtype\s*/Image", d)) != 1 or d.count(b"/DCTDecode") != 1
+            or b"/DeviceCMYK" in d or re.search(rb"/Rotate\s+[1-9]", d)
+            or len(re.findall(rb"/Type\s*/Page[^s]", d)) != 1):
+        return None
+    m = re.search(rb"/DCTDecode.*?stream\r?\n", d, re.S)
+    end = d.find(b"endstream", m.end()) if m else -1
+    if end < 0 or d[m.end():m.end() + 2] != b"\xff\xd8":
+        return None
+    img = cv2.imdecode(np.frombuffer(d[m.end():end], np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return None
+    box = re.search(rb"/MediaBox\s*\[\s*[-\d.]+\s+[-\d.]+\s+([-\d.]+)\s+([-\d.]+)", d)
+    width_in = float(box.group(1)) / 72 if box else 0
+    return img, round(img.shape[1] / width_in) if width_in > 0 else DPI
+
+
+def _image_dpi(path: Path):
+    res = subprocess.run(["magick", "identify", "-units", "PixelsPerInch",
+                          "-format", "%x", f"{path}[0]"], capture_output=True, text=True)
+    try:
+        dpi = round(float(res.stdout.split()[0]))
+    except (ValueError, IndexError):
+        return DPI
+    return dpi if dpi >= 100 else DPI   # 72 means "unknown" in most files
+
+
 def load_page(path: Path, tmp: Path):
-    """Return the page as a BGR image (first page only for PDFs)."""
+    """Return the page as a BGR image at full scan resolution (first page only)."""
+    global page_dpi
     if path.suffix.lower() == ".pdf":
-        png = tmp / (path.stem + ".png")
-        res = subprocess.run(
-            ["magick", "-density", str(DPI), f"{path}[0]",
-             "-background", "white", "-alpha", "remove", str(png)],
-            capture_output=True, text=True)
-        if res.returncode != 0:
-            raise RuntimeError("not a readable PDF (incomplete or damaged?)")
-        path = png
-    img = cv2.imread(str(path))
+        found = _pdf_jpeg(path)
+        if found:
+            img, page_dpi = found
+        else:
+            png = tmp / (path.stem + ".png")
+            res = subprocess.run(
+                ["magick", "-density", str(DPI), f"{path}[0]",
+                 "-background", "white", "-alpha", "remove", str(png)],
+                capture_output=True, text=True)
+            if res.returncode != 0:
+                raise RuntimeError("not a readable PDF (incomplete or damaged?)")
+            img, page_dpi = cv2.imread(str(png)), DPI
+    else:
+        img, page_dpi = cv2.imread(str(path)), _image_dpi(path)
     if img is None:
         raise RuntimeError("not a readable image")
+    if page_dpi < MIN_DPI:
+        # Detection and face finding were tuned on low-resolution scans after
+        # Ghostscript had enlarged them to 300 dpi, so enlarge them the same
+        # way (plain pixel repetition). This adds no real detail.
+        f = MIN_DPI / page_dpi
+        img = cv2.resize(img, None, fx=f, fy=f, interpolation=cv2.INTER_NEAREST)
+        page_dpi = MIN_DPI
     return img
 
 
@@ -301,10 +353,11 @@ def crop_rect(img, rect):
     m = cv2.getRotationMatrix2D((cx, cy), ang, 1.0)
     rotated = cv2.warpAffine(img, m, (img.shape[1], img.shape[0]),
                              flags=cv2.INTER_CUBIC, borderValue=(255, 255, 255))
-    x0 = int(round(cx - w / 2)) + INSET_PX
-    y0 = int(round(cy - h / 2)) + INSET_PX
-    x1 = int(round(cx + w / 2)) - INSET_PX
-    y1 = int(round(cy + h / 2)) - INSET_PX
+    inset = int(round(INSET_IN * page_dpi))
+    x0 = int(round(cx - w / 2)) + inset
+    y0 = int(round(cy - h / 2)) + inset
+    x1 = int(round(cx + w / 2)) - inset
+    y1 = int(round(cy + h / 2)) - inset
     return rotated[max(y0, 0):y1, max(x0, 0):x1]
 
 
@@ -456,7 +509,7 @@ def _upright_size(rect):
 
 def _size_text(rect):
     w, h = _upright_size(rect)
-    return f"{int(w)}x{int(h)} px, about {w / DPI:.1f} x {h / DPI:.1f} in"
+    return f"{int(w)}x{int(h)} px, about {w / page_dpi:.1f} x {h / page_dpi:.1f} in"
 
 
 def write_report(out: Path, stamp: str, source: str, kept_at: str, img=None,

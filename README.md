@@ -105,6 +105,7 @@ That's it. Scan a page and check the **Photo Album Scans** album in Google Photo
 ## Using it
 
 - **Scan size:** use **A4**, even on a Letter-sized flatbed. Album pages are usually longer than Letter, and the extra length catches the bottom photo.
+- **Resolution and quality:** scan at **600 dpi** with the highest quality setting your scanner has. The photos keep the scanner's full resolution: a 6 × 4 inch print comes out at about 3600 × 2400 pixels at 600 dpi, and only 900 × 600 at 150 dpi.
 - **Where things go:**
   - photos: `~/scans/photos/`, named by scan time (`2026-11-15_1527_1.jpg`, `_2`, `_3`, top to bottom)
   - split scans: `~/scans/done/`
@@ -167,7 +168,7 @@ python3 split_photos.py ~/scans --watch    # keep running in this terminal
 
 An album's plastic sleeve is almost colourless, while photos, even pale ones like snow scenes, have some colour. For each page, the script:
 
-1. renders the scan at 300 dpi
+1. takes the scanner's own image at full resolution. HP's scan PDFs hold one JPEG, which is used directly with no re-rendering. Other PDFs are rendered at 600 dpi. Scans below 300 dpi are enlarged to 300 dpi, which adds no detail but keeps detection consistent.
 2. marks every pixel that is noticeably coloured or dark
 3. cleans up that mask and finds each large, solid rectangle, one per photo
 4. recovers photos whose shape came out wrong:
@@ -187,6 +188,7 @@ The script finds the photos fresh on every page instead of cutting at fixed posi
 - Black-and-white or very faded photos may be missed, because detection is based on colour. Check with `--debug`.
 - Photos touching each other, with no sleeve gap between them, may come out as a single image.
 - Sideways photos are only turned when they show a clear face. Landscapes, buildings and photos of people seen from behind or far away stay as scanned; rotate those in Google Photos. Turn auto-rotation off with `--no-rotate`.
+- A photo of someone lying down can be turned so their face is upright and the rest of the scene is on its side.
 - The background service is macOS-only. On Linux, run `--watch` from a systemd user service.
 
 ## Files on your Mac

@@ -25,7 +25,7 @@ Scan → Scan to Network Folder Setup → **New**:
 | Network path | `\\<mac-ip>\scans` (backslashes; an IP is more reliable than a `.local` name) |
 | Username / password | the Mac account's short name (`whoami`) and its login password; the user types the password |
 
-Choose PDF at 300 dpi, then **Save and Test**.
+Choose PDF at **600 dpi** with the highest quality / largest file size the printer offers, then **Save and Test**. The script uses the scanner's own image at full resolution, so the scan settings decide the photos' quality. (The first 27 pages of the original album were scanned at 150 dpi by mistake; check a new setup with the resolution check in SKILL.md.)
 
 - If it suddenly stops working, the Mac's IP has probably changed. Suggest a DHCP reservation in the router.
 - If the test still fails once the firewall allows smbd, the next suspect is old printer firmware that only speaks SMB1, which macOS no longer supports. Update the printer firmware.
