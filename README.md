@@ -2,7 +2,7 @@
 
 **Turn a physical photo album into a Google Photos album, using just a flatbed scanner and a Mac.**
 
-Lay an album page on the scanner and press Scan. A few seconds later, every photo on that page shows up as its own straightened image in a Google Photos album. You don't crop anything, rename anything or upload anything by hand.
+Lay a whole album page on the scanner, with the photos still in their sleeves, and press Scan. A few seconds later, every photo on that page shows up as its own straightened image in a Google Photos album, turned the right way up even if it was stored sideways in the album. You don't take any photos out of the album, and you don't crop anything, rotate anything, rename anything or upload anything by hand.
 
 ```
  album page ──► scanner ──► folder on your Mac ──► split into photos ──► Google Photos album
@@ -15,7 +15,7 @@ A small background service on the Mac does all of this:
 2. **Splits each page.** It finds each photo on the album page, even when photos sit at slightly different spots on each page or are a little crooked. It straightens them, turns photos that were stored sideways or upside down the right way up, and saves each one as a JPEG.
 3. **Uploads to Google Photos.** It adds the photos to an album in your Google Photos library. The script can only *add* photos. It can't see, change or delete anything else in your library.
 
-Everything runs on your Mac; the only place photos are sent is your own Google account.
+Everything runs on your Mac with ordinary image-processing code, with no AI service involved. The only place photos are sent is your own Google account.
 
 ## What you need
 
@@ -110,6 +110,7 @@ That's it. Scan a page and check the **Photo Album Scans** album in Google Photo
   - split scans: `~/scans/done/`
   - uploads: the album you chose
 - **What it's doing:** `tail -f ~/Library/Logs/photoScanner.log`
+- **Sideways photos** are turned upright automatically when they show a face, before they're uploaded. The log shows each one, for example `turned upright: 2026-11-16_0606_1.jpg 90°`. A photo with no clear face, such as a landscape or a building, is left as scanned; rotate it in Google Photos. Auto-rotation only applies to new scans, not to photos already uploaded. To turn it off, reinstall with `--no-rotate`.
 - **A photo didn't come out, or is cut off:** look in `~/scans/photos/` for a `<scan-time>_PROBLEM.txt` file. One is written for every scan where:
   - a photo-sized area couldn't be extracted
   - a photo is cut off by the scanner's edge
