@@ -158,7 +158,7 @@ def not_uploaded(folder: Path):
     done = set(ledger.read_text().splitlines()) if ledger.exists() else set()
     return [p for p in sorted(folder.glob("*.jpg"))
             if p.name not in done and p.name not in REJECTED
-            and "_boxes" not in p.stem]
+            and "_boxes" not in p.stem and "_CUTOFF" not in p.stem]
 
 
 def upload_pending(folder: Path, album: str):

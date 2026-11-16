@@ -63,40 +63,226 @@ def load_page(path: Path, tmp: Path):
     return img
 
 
-def find_photos(img, missed=None):
+EDGE_T = 10               # gradient strength that counts as a photo's border
+EDGE_SUPPORT = 0.7        # fraction of a side that must lie on that border
+MAX_RECOVERED_FRAC = 0.35 # a recovered "photo" bigger than this is suspect
+SLIVER_FRAC = 0.005       # smaller blobs at the scan's edge are ignored entirely
+CUTOFF_RATIO = 0.6        # a photo at the scan edge this much smaller than the
+                          # page's other photos is treated as cut off
+_K15 = np.ones((15, 15), np.uint8)
+
+
+def _mask(hsv, sat_min=SAT_MIN, dark_max=DARK_MAX):
+    """Pixels that look like photo (coloured or dark), cleaned up. Opening
+    breaks thin bridges across sleeve gaps and removes specks; closing fills
+    small pale areas inside a photo."""
+    m = ((hsv[..., 1] > sat_min) | (hsv[..., 2] < dark_max)).astype(np.uint8) * 255
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, _K15)
+    return cv2.morphologyEx(m, cv2.MORPH_CLOSE, _K15)
+
+
+def _fill(c):
+    (_, _), (w, h), _ = cv2.minAreaRect(c)
+    return cv2.contourArea(c) / max(w * h, 1)
+
+
+def _upright(rect):
+    """Same rectangle with its angle in [-45, 45] (width/height swapped to match)."""
+    (cx, cy), (w, h), a = rect
+    while a > 45:
+        a, w, h = a - 90, h, w
+    while a < -45:
+        a, w, h = a + 90, h, w
+    return (cx, cy), (w, h), a
+
+
+def _snap_to_edges(gray, rect):
+    """Move each side of `rect` outward to the nearest long straight edge (the
+    photo's border). Returns the snapped rect, or None if a side has no edge
+    within one photo-length. Recovers photos with pale sky/snow along a side,
+    where colour alone can't tell photo from sleeve."""
+    (cx, cy), (w, h), a = _upright(rect)
+    M = cv2.getRotationMatrix2D((cx, cy), a, 1.0)
+    g = cv2.warpAffine(gray, M, gray.shape[::-1], flags=cv2.INTER_LINEAR, borderValue=255)
+    g = cv2.GaussianBlur(g, (3, 3), 0).astype(np.float32)
+    gy = np.abs(cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)) / 4
+    gx = np.abs(cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)) / 4
+    H, W = g.shape
+    x0, x1, y0, y1 = cx - w / 2, cx + w / 2, cy - h / 2, cy + h / 2
+
+    def row(y, xa, xb):
+        y, xa, xb = int(round(y)), int(max(xa, 0)), int(min(xb, W - 1))
+        if y < 2 or y > H - 3 or xb <= xa:
+            return 0.0
+        return float((gy[y - 2:y + 3, xa:xb].max(axis=0) > EDGE_T).mean())
+
+    def col(x, ya, yb):
+        x, ya, yb = int(round(x)), int(max(ya, 0)), int(min(yb, H - 1))
+        if x < 2 or x > W - 3 or yb <= ya:
+            return 0.0
+        return float((gx[ya:yb, x - 2:x + 3].max(axis=1) > EDGE_T).mean())
+
+    def first_edge(start, step, limit, support):
+        for d in range(int(limit)):
+            if support(start + step * d) >= EDGE_SUPPORT:
+                return start + step * d
+        return None
+
+    for _ in range(2):   # a moved side changes the span the others are measured on
+        mx, my = (x1 - x0) * 0.1, (y1 - y0) * 0.1   # ignore the corners
+        t = first_edge(y0, -1, y1 - y0, lambda v: row(v, x0 + mx, x1 - mx))
+        b = first_edge(y1, +1, y1 - y0, lambda v: row(v, x0 + mx, x1 - mx))
+        l = first_edge(x0, -1, x1 - x0, lambda v: col(v, y0 + my, y1 - my))
+        r = first_edge(x1, +1, x1 - x0, lambda v: col(v, y0 + my, y1 - my))
+        if None in (t, b, l, r):
+            return None
+        x0, x1, y0, y1 = l, r, t, b
+    c = cv2.invertAffineTransform(M) @ np.array([(x0 + x1) / 2, (y0 + y1) / 2, 1.0])
+    return (float(c[0]), float(c[1])), (x1 - x0, y1 - y0), a
+
+
+def _recover(hsv, gray, c, page_area):
+    """Try to find the photo inside a blob that isn't rectangular enough.
+    Returns a rect (detection coords) or None."""
+    region = np.zeros(hsv.shape[:2], np.uint8)
+    cv2.drawContours(region, [c], 0, 255, -1)
+    region = cv2.dilate(region, _K15)
+    area0 = cv2.contourArea(c)
+
+    # 1. The photo merged with the sleeve's yellowed edge: stricter colour
+    #    thresholds drop the pale-yellow plastic and keep the photo.
+    for sat in (40, 55, 70, 90):
+        for dark in (DARK_MAX, 120):
+            cs, _ = cv2.findContours(_mask(hsv, sat, dark) & region,
+                                     cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if cs:
+                best = max(cs, key=cv2.contourArea)
+                a = cv2.contourArea(best)
+                if a >= MIN_AREA_FRAC * page_area and a >= 0.5 * area0 and _fill(best) >= 0.88:
+                    return cv2.minAreaRect(best)
+
+    # 2. Pale sky/snow along a side: snap the box to the photo's border.
+    r = _snap_to_edges(gray, cv2.minAreaRect(cv2.convexHull(c)))
+    if r and r[1][0] * r[1][1] >= MIN_AREA_FRAC * page_area:
+        return r
+
+    # 3. A small pale notch: the convex hull is still a clean rectangle.
+    hull = cv2.convexHull(c)
+    r = cv2.minAreaRect(hull)
+    ra = r[1][0] * r[1][1]
+    if cv2.contourArea(hull) / ra >= 0.95 and area0 / ra >= 0.6:
+        return r
+
+    # 4. A thin attachment: a much larger opening cuts it off.
+    for k in (31, 51):
+        m = cv2.morphologyEx(region & _mask(hsv), cv2.MORPH_OPEN, np.ones((k, k), np.uint8))
+        cs, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if cs:
+            best = max(cs, key=cv2.contourArea)
+            if cv2.contourArea(best) >= MIN_AREA_FRAC * page_area and _fill(best) >= 0.88:
+                return cv2.minAreaRect(best)
+    return None
+
+
+def _touches_edge(rect, shape, margin=0.01):
+    """Does the rotated rect reach within `margin` of the image border?"""
+    pts = cv2.boxPoints(rect)
+    h, w = shape[:2]
+    return bool(pts[:, 0].min() < w * margin or pts[:, 1].min() < h * margin
+                or pts[:, 0].max() > w * (1 - margin) or pts[:, 1].max() > h * (1 - margin))
+
+
+def cut_off(rects, shape):
+    """Indexes of photos that touch the scan's edge and are much smaller than
+    the page's other photos, i.e. probably partly off the scanner."""
+    areas = [r[1][0] * r[1][1] for r in rects]
+    out = []
+    for i, r in enumerate(rects):
+        others = areas[:i] + areas[i + 1:]
+        if others and _touches_edge(r, shape) and areas[i] < CUTOFF_RATIO * float(np.median(others)):
+            out.append(i)
+    return out
+
+
+def _looks_like_photo_piece(hsv, c, shape):
+    """Is this small blob at the scan's edge a piece of a photo, rather than a
+    yellowed sleeve corner or a thin strip of the album page's edge?"""
+    (_, _), (w, h), _ = cv2.minAreaRect(c)
+    if min(w, h) < 0.015 * shape[1] or _fill(c) < 0.75:
+        return False
+    m = np.zeros(shape[:2], np.uint8)
+    cv2.drawContours(m, [c], 0, 255, -1)
+    sat, val = hsv[..., 1][m > 0], hsv[..., 2][m > 0]
+    return bool(np.median(sat) >= 60 or np.median(val) <= 120)
+
+
+def _overlap(r1, r2):
+    ret, pts = cv2.rotatedRectangleIntersection(r1, r2)
+    return cv2.contourArea(pts) if ret != cv2.INTERSECT_NONE and pts is not None else 0.0
+
+
+def find_photos(img, missed=None, recovered=None):
     """Return rotated rectangles (cv2.minAreaRect) for each photo, in full-res coords.
 
-    If `missed` is a list, photo-sized regions that were *not* extracted are
-    appended to it as dicts (rect, area_frac, fill), so they can be reported."""
+    Blobs that aren't rectangular enough (a photo merged with the sleeve edge,
+    or with pale sky/snow along a side) go through _recover(). If `recovered`
+    is a list, the indexes (in the returned order) of photos found that way are
+    stored in it. If `missed` is a list, photo-sized regions that still couldn't
+    be extracted are appended as dicts (rect, area_frac, fill) for reporting."""
     scale = DETECT_WIDTH / img.shape[1]
     small = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     hsv = cv2.cvtColor(cv2.medianBlur(small, 7), cv2.COLOR_BGR2HSV)
-    mask = ((hsv[..., 1] > SAT_MIN) | (hsv[..., 2] < DARK_MAX)).astype(np.uint8) * 255
-    # Opening breaks thin bridges across the sleeve gaps and removes specks;
-    # closing fills small pale areas inside a photo (e.g. snow, sky).
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((15, 15), np.uint8))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((15, 15), np.uint8))
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    mask = _mask(hsv)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     page_area = mask.shape[0] * mask.shape[1]
-    rects = []
+    good, fixed, lost, slivers = [], [], [], []
     for c in contours:
         area = cv2.contourArea(c)
         if area < MIN_AREA_FRAC * page_area:
+            # A photo lying mostly off the scanner leaves a small piece at the
+            # edge of the scan; report it rather than ignoring it.
+            if area >= SLIVER_FRAC * page_area and _touches_edge(cv2.minAreaRect(c), mask.shape) \
+                    and _looks_like_photo_piece(hsv, c, mask.shape):
+                slivers.append(c)
             continue
-        (cx, cy), (w, h), ang = cv2.minAreaRect(c)
-        full = ((cx / scale, cy / scale), (w / scale, h / scale), ang)
-        if area / (w * h) < MIN_FILL:
-            if missed is not None:
-                missed.append({"rect": full, "area_frac": area / page_area,
-                               "fill": area / (w * h)})
+        if _fill(c) >= MIN_FILL:
+            good.append(cv2.minAreaRect(c))
             continue
-        rects.append(full)
-    # Top-to-bottom, then left-to-right for photos side by side.
+        r = _recover(hsv, gray, c, page_area)
+        if r:
+            fixed.append((r, c))
+        else:
+            lost.append(c)
+
+    # A recovered photo must be photo-sized and must not overlap a photo found
+    # normally; otherwise it probably swallowed its neighbours.
+    for r, c in fixed:
+        ra = r[1][0] * r[1][1]
+        if ra > MAX_RECOVERED_FRAC * page_area or any(
+                _overlap(r, o) > 0.05 * min(ra, o[1][0] * o[1][1]) for o in good):
+            lost.append(c)
+        else:
+            good.append(r)
+    fixed_ids = {id(r) for r, _ in fixed}
+
+    def to_full(r):
+        (cx, cy), (w, h), ang = r
+        return (cx / scale, cy / scale), (w / scale, h / scale), ang
+
     row_tol = img.shape[0] * 0.05
-    rects.sort(key=lambda r: (round(r[0][1] / row_tol), r[0][0]))
+    key = lambda r: (round(r[0][1] / row_tol), r[0][0])
+    pairs = sorted(((to_full(r), id(r) in fixed_ids) for r in good), key=lambda p: key(p[0]))
+    rects = [r for r, _ in pairs]
+    if recovered is not None:
+        recovered.extend(i for i, (_, was_fixed) in enumerate(pairs) if was_fixed)
     if missed is not None:
-        missed.sort(key=lambda m: (round(m["rect"][0][1] / row_tol), m["rect"][0][0]))
+        for kind, cs in (("irregular", lost), ("off-scanner", slivers)):
+            for c in cs:
+                missed.append({"rect": to_full(cv2.minAreaRect(c)), "kind": kind,
+                               "area_frac": cv2.contourArea(c) / page_area, "fill": _fill(c)})
+        missed.sort(key=lambda m: key(m["rect"]))
     return rects
 
 
@@ -148,9 +334,9 @@ def gather(inputs):
     return files
 
 
-def draw_boxes(img, rects, missed=()):
-    """Copy of the page with extracted photos boxed in red (numbered) and
-    skipped photo-sized regions in yellow (labelled MISSED n)."""
+def draw_boxes(img, rects, missed=(), cutoff=()):
+    """Copy of the page with extracted photos boxed in red (numbered), cut-off
+    photos in magenta (CUT OFF n) and missed regions in yellow (MISSED n)."""
     dbg = img.copy()
     font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 3.0, 8
 
@@ -159,12 +345,15 @@ def draw_boxes(img, rects, missed=()):
         cv2.drawContours(dbg, [pts], 0, colour, 10)
         # Keep the label on the page even when the box starts above or left of it.
         x = max(pts[:, 0].min(), 0) + 20
-        y = max(pts[:, 1].min(), 0) + 110
+        y = min(max(pts[:, 1].min(), 0) + 110, dbg.shape[0] - 30)
         cv2.putText(dbg, label, (int(x), int(y)), font, scale, (0, 0, 0), thick + 8)
         cv2.putText(dbg, label, (int(x), int(y)), font, scale, colour, thick)
 
-    for i, r in enumerate(rects, 1):
-        box(r, (0, 0, 255), str(i))
+    for i, r in enumerate(rects):
+        if i in cutoff:
+            box(r, (255, 0, 255), f"CUT OFF {i + 1}")
+        else:
+            box(r, (0, 0, 255), str(i + 1))
     for i, m in enumerate(missed, 1):
         box(m["rect"], (0, 200, 255), f"MISSED {i}")
     return dbg
@@ -196,27 +385,20 @@ def _size_text(rect):
     return f"{int(w)}x{int(h)} px, about {w / DPI:.1f} x {h / DPI:.1f} in"
 
 
-def _touches_edge(rect, shape, margin=0.01):
-    pts = cv2.boxPoints(rect)
-    h, w = shape[:2]
-    return (pts[:, 0].min() < w * margin or pts[:, 1].min() < h * margin
-            or pts[:, 0].max() > w * (1 - margin) or pts[:, 1].max() > h * (1 - margin))
-
-
 def write_report(out: Path, stamp: str, source: str, kept_at: str, img=None,
-                 rects=(), names=(), missed=(), error=None):
+                 rects=(), names=(), missed=(), cutoff=(), recovered=(), error=None):
     """Write <stamp>_PROBLEM.txt (and a marked-up page image) explaining a
-    scan whose photos weren't all extracted. Returns the report path."""
+    scan whose photos weren't all extracted cleanly. Returns the report path."""
     report = unused_name(out, f"{stamp}_PROBLEM", ".txt")
     boxes = None
     if img is not None:
         boxes = report.with_name(report.stem + "_boxes.jpg")
-        cv2.imwrite(str(boxes), draw_boxes(img, rects, missed),
+        cv2.imwrite(str(boxes), draw_boxes(img, rects, missed, cutoff),
                     [cv2.IMWRITE_JPEG_QUALITY, 80])
 
     lines = [
-        "photoScanner: some photos on this scan were NOT extracted",
-        "=" * 58,
+        "photoScanner: some photos on this scan were not extracted cleanly",
+        "=" * 64,
         "",
         f"Scan file:     {source}",
         f"Scan kept at:  {kept_at}",
@@ -224,8 +406,8 @@ def write_report(out: Path, stamp: str, source: str, kept_at: str, img=None,
         f"Checked:       {datetime.now():%Y-%m-%d %H:%M}",
     ]
     if boxes:
-        lines.append(f"Marked-up page: {boxes.name}  "
-                     "(red = extracted, yellow = missed)")
+        lines.append(f"Marked-up page: {boxes.name}")
+        lines.append("  (red = extracted, magenta = cut off, yellow = missed)")
     lines.append("")
 
     if error:
@@ -234,40 +416,55 @@ def write_report(out: Path, stamp: str, source: str, kept_at: str, img=None,
                   "  It stays in the scans folder and is retried if it changes;",
                   "  otherwise scan the page again.", ""]
     else:
-        lines.append(f"EXTRACTED ({len(names)})")
-        for n, r in zip(names, rects):
-            lines.append(f"  {n}  {_where(r, img.shape)}, {_size_text(r)}")
-        if not names:
+        lines.append(f"EXTRACTED ({len(names) - len(cutoff)})")
+        for i, (n, r) in enumerate(zip(names, rects)):
+            if i in cutoff:
+                continue
+            note = "  (recovered: outline merged with sleeve or pale edge; check the crop)" \
+                if i in recovered else ""
+            lines.append(f"  {n}  {_where(r, img.shape)}, {_size_text(r)}{note}")
+        if len(names) == len(cutoff):
             lines.append("  none")
         lines.append("")
 
+        if cutoff:
+            lines.append(f"CUT OFF BY THE SCANNER EDGE ({len(cutoff)}), saved but NOT uploaded")
+            for i in cutoff:
+                lines.append(f"  {names[i]}  {_where(rects[i], img.shape)}, {_size_text(rects[i])}")
+            lines += ["  These touch the edge of the scan and are much smaller than the",
+                      "  other photos on the page, so part of each is probably missing.", ""]
+
         lines.append(f"MISSED ({len(missed)})")
-        if not missed:
+        if not missed and not rects:
             lines += ["  No photo-sized region was found at all. The page may be",
                       "  blank, or every photo is black-and-white / very faded",
                       "  (detection relies on colour)."]
+        elif not missed:
+            lines.append("  none")
         for i, m in enumerate(missed, 1):
             r = m["rect"]
             lines.append(f"  {i}. {_where(r, img.shape)} of the page, {_size_text(r)} "
-                         f"({m['area_frac'] * 100:.0f}% of the page)")
-            lines.append(f"     Its outline only fills {m['fill'] * 100:.0f}% of its bounding "
-                         f"box; a photo must fill {MIN_FILL * 100:.0f}%.")
-            if _touches_edge(r, img.shape):
-                lines.append("     It touches the edge of the scan, so it may be cut off "
-                             "or merged with the album page's edge.")
-            lines.append("     Likely cause: the photo's outline joins the album "
-                         "sleeve's coloured edge, or has pale sky/snow along one side.")
+                         f"({m['area_frac'] * 100:.1f}% of the page)")
+            if m.get("kind") == "off-scanner":
+                lines.append("     Only a small piece is on the scan, at its edge: the photo")
+                lines.append("     was probably lying mostly off the scanner glass.")
+            else:
+                lines.append(f"     Its outline only fills {m['fill'] * 100:.0f}% of its bounding "
+                             f"box (a photo should fill {MIN_FILL * 100:.0f}%), and it")
+                lines.append("     couldn't be straightened out. Often several small photos")
+                lines.append("     overlapping in one slot, or a photo merged with the page edge.")
         lines.append("")
 
     lines += [
         "WHAT TO DO",
-        "  - Rescan the page, shifted slightly away from the scanner's edges.",
-        "  - Or crop the missed photo by hand from the scan above.",
+        "  - Rescan the page with the album page fully on the glass, slightly",
+        "    away from the scanner's edges.",
+        "  - Or crop the photo by hand from the scan above.",
         "  - To see the detection again:",
         f"      python3 split_photos.py \"{kept_at}\" --keep --debug -o /tmp/check",
         "",
-        "This file and the marked-up image are not uploaded to Google Photos;",
-        "delete them once you've dealt with the scan.",
+        "This file, the marked-up image and *_CUTOFF.jpg files are not uploaded",
+        "to Google Photos; delete them once you've dealt with the scan.",
     ]
     report.write_text("\n".join(lines) + "\n")
     return report
@@ -278,17 +475,19 @@ def process(f: Path, args, tmp: Path):
     out = Path(args.out).expanduser() if args.out else f.parent / "photos"
     out.mkdir(parents=True, exist_ok=True)
     img = load_page(f, tmp)
-    missed = []
-    rects = find_photos(img, missed)
+    missed, recovered = [], []
+    rects = find_photos(img, missed, recovered)
+    cutoff = cut_off(rects, img.shape)
     stamp = scan_stamp(f)
     names = []
-    for i, r in enumerate(rects, 1):
-        dest = unused_name(out, f"{stamp}_{i}", ".jpg")
+    for i, r in enumerate(rects):
+        # Cut-off photos are kept for reference but named so they aren't uploaded.
+        dest = unused_name(out, f"{stamp}_{i + 1}" + ("_CUTOFF" if i in cutoff else ""), ".jpg")
         cv2.imwrite(str(dest), crop_rect(img, r), [cv2.IMWRITE_JPEG_QUALITY, 95])
         names.append(dest.name)
     if args.debug:
         cv2.imwrite(str(unused_name(out, f"{stamp}_boxes", ".jpg")),
-                    draw_boxes(img, rects, missed))
+                    draw_boxes(img, rects, missed, cutoff))
     moved, kept_at = "", f
     if args.keep:
         ledger_add(f)
@@ -298,12 +497,17 @@ def process(f: Path, args, tmp: Path):
         target = unused_name(done, f.stem, f.suffix)
         shutil.move(str(f), str(target))
         moved, kept_at = f", moved to done/{target.name}", target
-    print(f"{f.name}: {len(rects)} photo(s) -> {', '.join(names) or 'none'}{moved}",
+    extra = f" ({len(recovered)} recovered)" if recovered else ""
+    print(f"{f.name}: {len(rects) - len(cutoff)} photo(s){extra} -> "
+          f"{', '.join(n for i, n in enumerate(names) if i not in cutoff) or 'none'}{moved}",
           flush=True)
-    if missed or not rects:
-        report = write_report(out, stamp, f.name, str(kept_at), img, rects, names, missed)
-        print(f"  {len(missed) or 'some'} photo(s) not extracted; see {report.name}",
-              flush=True)
+    if missed or cutoff or not rects:
+        report = write_report(out, stamp, f.name, str(kept_at), img, rects, names,
+                              missed, cutoff, recovered)
+        problems = [f"{len(cutoff)} cut off" if cutoff else "",
+                    f"{len(missed)} missed" if missed else "",
+                    "none found" if not rects and not missed else ""]
+        print(f"  {', '.join(p for p in problems if p)}; see {report.name}", flush=True)
 
 
 def report_unreadable(f: Path, args, error):

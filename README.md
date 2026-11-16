@@ -110,13 +110,22 @@ That's it. Scan a page and check the **Photo Album Scans** album in Google Photo
   - split scans: `~/scans/done/`
   - uploads: the album you chose
 - **What it's doing:** `tail -f ~/Library/Logs/photoScanner.log`
-- **A photo didn't come out:** look in `~/scans/photos/` for a `<scan-time>_PROBLEM.txt` file. One is written for every scan where a photo-sized area was skipped, no photos were found, or the file couldn't be read. It says:
+- **A photo didn't come out, or is cut off:** look in `~/scans/photos/` for a `<scan-time>_PROBLEM.txt` file. One is written for every scan where:
+  - a photo-sized area couldn't be extracted
+  - a photo is cut off by the scanner's edge
+  - a photo was lying mostly off the glass
+  - no photos were found
+  - the file couldn't be read
+
+  The report says:
   - which scan it was and where that file is now
   - what was extracted
   - where on the page each missed photo is, its size, and why it was skipped
   - what to do about it
 
-  Next to it, `<scan-time>_PROBLEM_boxes.jpg` shows the page with extracted photos boxed in red and missed ones in yellow. Neither file is uploaded. Delete them once you've rescanned the page or cropped the photo by hand.
+  Next to it, `<scan-time>_PROBLEM_boxes.jpg` shows the page with extracted photos boxed in red, cut-off ones in magenta and missed ones in yellow.
+
+  A cut-off photo, meaning one that touches the edge of the scan and is much smaller than the others on the page, is saved as `…_CUTOFF.jpg` so you have it, but it isn't uploaded. Neither are the report and the marked-up page. Delete them once you've rescanned the page or cropped the photo by hand.
 - **A page split wrong:** run `python3 split_photos.py ~/scans/done/scan-3.pdf --keep --debug -o /tmp/check` on the scan in question. `/tmp/check` then contains the crops, plus a picture of the page with red boxes around the photos it found.
 - **The log says you're not signed in:** run `python3 split_photos.py --photos-login` again.
 - **Different album:** reinstall with `--album "Grandma's album"`. The script creates the album the first time it uploads to it.
@@ -159,13 +168,18 @@ An album's plastic sleeve is almost colourless, while photos, even pale ones lik
 1. renders the scan at 300 dpi
 2. marks every pixel that is noticeably coloured or dark
 3. cleans up that mask and finds each large, solid rectangle, one per photo
-4. straightens slightly tilted photos and saves each one as a JPEG
+4. recovers photos whose shape came out wrong:
+   - **A photo that merged with the sleeve's yellowed edge** is separated again with stricter colour thresholds.
+   - **A photo with pale sky or snow along a side**, where colour can't tell photo from sleeve, has its box snapped outward to the photo's straight border.
+   - A recovered photo that would overlap another photo, or cover more than a third of the page, is rejected and reported instead.
+5. straightens slightly tilted photos and saves each one as a JPEG
 
 The script finds the photos fresh on every page instead of cutting at fixed positions, so it doesn't matter if the photos sit differently from page to page.
 
 ## Limitations
 
-- A photo whose outline runs into the album sleeve's yellowed edge, or that has pale sky or snow along one edge, can be skipped. You'll get a `_PROBLEM.txt` report when that happens.
+- Several small photos overlapping in one slot (for example school wallet photos) may come out as one image, or be skipped with a `_PROBLEM.txt` report.
+- A recovered photo can include a thin strip of sleeve along one edge.
 - Black-and-white or very faded photos may be missed, because detection is based on colour. Check with `--debug`.
 - Photos touching each other, with no sleeve gap between them, may come out as a single image.
 - Photos stored sideways in the album come out sideways. Rotate them in Google Photos.
