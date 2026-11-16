@@ -4,7 +4,8 @@
 Finds each photo on the page by colour (the album sleeve is nearly
 colourless, photos are not), so it adapts when photos sit in slightly
 different places from page to page. Slightly tilted photos are
-straightened.
+straightened, and photos stored sideways or upside down in the album are
+turned upright when they show a face.
 
 Usage:
     python3 split_photos.py [INPUT ...] [-o OUTPUT_DIR] [--watch]
@@ -307,6 +308,79 @@ def crop_rect(img, rect):
     return rotated[max(y0, 0):y1, max(x0, 0):x1]
 
 
+# ---- turning sideways photos upright ----------------------------------------
+# Photos are often stored sideways in an album. We try each quarter turn and
+# keep the one where a face detector (OpenCV's YuNet, a small model that runs
+# locally) finds upright faces. Photos without a clear face are left alone.
+FACE_MODEL = Path(__file__).resolve().parent / "models" / "face_detection_yunet_2023mar.onnx"
+FACE_SIZE = 960           # photos are shrunk to this long side for face finding
+FACE_MIN_SCORE = 0.75     # ignore weaker face detections
+TURN_MIN_SCORE = 0.80     # a turn needs a face at least this confident...
+TURN_SURE_SCORE = 0.88    # ...and this confident if another turn also shows one
+_TURNS = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180,
+          270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+_face_detector = None
+
+
+def _faces_upright_score(det, img):
+    """Sum of confidences of faces that are upright in img."""
+    s = FACE_SIZE / max(img.shape[:2])
+    small = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) if s < 1 else img
+    det.setInputSize((small.shape[1], small.shape[0]))
+    _, faces = det.detect(small)
+    total = 0.0
+    for f in faces if faces is not None else ():
+        if f[14] < FACE_MIN_SCORE:
+            continue
+        # Landmarks: right eye, left eye, nose, right and left mouth corner.
+        # The detector also fires on faces turned well off upright, so check
+        # the landmarks really are in upright order.
+        reye, leye, nose = f[4:6], f[6:8], f[8:10]
+        eyes, mouth = (reye + leye) / 2, (f[10:12] + f[12:14]) / 2
+        down = mouth - eyes
+        tilt = abs(np.degrees(np.arctan2(down[0], down[1])))
+        if tilt < 35 and leye[0] > reye[0] and eyes[1] < nose[1] < mouth[1]:
+            total += float(f[14])
+    return total
+
+
+def upright_turn(img):
+    """Clockwise quarter turn (0, 90, 180 or 270) that makes the photo upright."""
+    global _face_detector
+    if _face_detector is None:
+        if not FACE_MODEL.exists():
+            print(f"(auto-rotate off: {FACE_MODEL} is missing)", flush=True)
+            _face_detector = False
+        else:
+            try:   # OpenCV prints a harmless backend warning otherwise
+                cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+            except AttributeError:
+                pass
+            _face_detector = cv2.FaceDetectorYN.create(str(FACE_MODEL), "", (320, 320),
+                                                       0.5, 0.3, 5000)
+    if not _face_detector:
+        return 0
+    # A photo that already has an upright face stays as it is. This keeps
+    # mixed pages (e.g. a sheet of school portraits) from being turned.
+    if _faces_upright_score(_face_detector, img) >= FACE_MIN_SCORE:
+        return 0
+    scores = {a: _faces_upright_score(_face_detector, cv2.rotate(img, r))
+              for a, r in _TURNS.items()}
+    best = max(scores, key=scores.get)
+    runner_up = max(v for a, v in scores.items() if a != best)
+    # Weak detections show up in wrong orientations too, so only turn when
+    # the winning face is clearly convincing. Leaving a photo as scanned is
+    # better than turning it the wrong way.
+    if scores[best] >= TURN_SURE_SCORE or (scores[best] >= TURN_MIN_SCORE
+                                           and runner_up < FACE_MIN_SCORE):
+        return best
+    return 0
+
+
+def turn(img, angle):
+    return img if angle == 0 else cv2.rotate(img, _TURNS[angle])
+
+
 def unused_name(folder: Path, stem: str, suffix: str) -> Path:
     """folder/stem+suffix, or stem-2, stem-3 ... if that name is taken."""
     p = folder / f"{stem}{suffix}"
@@ -479,11 +553,15 @@ def process(f: Path, args, tmp: Path):
     rects = find_photos(img, missed, recovered)
     cutoff = cut_off(rects, img.shape)
     stamp = scan_stamp(f)
-    names = []
+    names, turned = [], []
     for i, r in enumerate(rects):
         # Cut-off photos are kept for reference but named so they aren't uploaded.
         dest = unused_name(out, f"{stamp}_{i + 1}" + ("_CUTOFF" if i in cutoff else ""), ".jpg")
-        cv2.imwrite(str(dest), crop_rect(img, r), [cv2.IMWRITE_JPEG_QUALITY, 95])
+        photo = crop_rect(img, r)
+        angle = 0 if args.no_rotate else upright_turn(photo)
+        if angle:
+            turned.append(f"{dest.name} {angle}°")
+        cv2.imwrite(str(dest), turn(photo, angle), [cv2.IMWRITE_JPEG_QUALITY, 95])
         names.append(dest.name)
     if args.debug:
         cv2.imwrite(str(unused_name(out, f"{stamp}_boxes", ".jpg")),
@@ -501,6 +579,8 @@ def process(f: Path, args, tmp: Path):
     print(f"{f.name}: {len(rects) - len(cutoff)} photo(s){extra} -> "
           f"{', '.join(n for i, n in enumerate(names) if i not in cutoff) or 'none'}{moved}",
           flush=True)
+    if turned:
+        print(f"  turned upright: {', '.join(turned)}", flush=True)
     if missed or cutoff or not rects:
         report = write_report(out, stamp, f.name, str(kept_at), img, rects, names,
                               missed, cutoff, recovered)
@@ -658,6 +738,8 @@ def install_agent(args):
         prog.append("--keep")
     if args.debug:
         prog.append("--debug")
+    if args.no_rotate:
+        prog.append("--no-rotate")
     if args.upload:
         prog += ["--upload", "--album", args.album]
     # launchd starts with a bare PATH; include Homebrew so ImageMagick and
@@ -717,6 +799,8 @@ def main():
     ap.add_argument("--keep", action="store_true",
                     help="don't move split scans into done/ (a ledger file "
                          "remembers which were split)")
+    ap.add_argument("--no-rotate", action="store_true",
+                    help="don't turn sideways photos upright")
     ap.add_argument("--watch", action="store_true",
                     help="keep running and split new scans as they arrive")
     ap.add_argument("--interval", type=float, default=5,
