@@ -5,7 +5,7 @@ Finds each photo on the page by colour (the album sleeve is nearly
 colourless, photos are not), so it adapts when photos sit in slightly
 different places from page to page. Slightly tilted photos are
 straightened, and photos stored sideways or upside down in the album are
-turned upright when they show a face.
+turned upright when they show a face. Dark photos are brightened.
 
 Usage:
     python3 split_photos.py [INPUT ...] [-o OUTPUT_DIR] [--watch]
@@ -434,6 +434,35 @@ def turn(img, angle):
     return img if angle == 0 else cv2.rotate(img, _TURNS[angle])
 
 
+# ---- brightening dark photos ------------------------------------------------
+# The scanner can't be adjusted, and old prints often come out dark. A photo
+# whose typical (median) brightness is below DARK_MEDIAN has its black and
+# white points set and its mid-tones lifted towards TARGET_MEDIAN, on the
+# lightness channel only so colours stay as they are. The lift is capped so a
+# real night photo isn't turned into daylight. Other photos are untouched.
+DARK_MEDIAN = 0.40        # median lightness (0-1) below which a photo is "dark"
+TARGET_MEDIAN = 0.45      # lift dark photos' median towards this
+MIN_GAMMA = 0.55          # strongest lift allowed (gamma; 1 = none)
+
+
+def brighten(img):
+    """Return (image, True) with a dark photo brightened, or (img, False)."""
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    light = lab[..., 0].astype(np.float32) / 255
+    if float(np.median(light)) >= DARK_MEDIAN:
+        return img, False
+    # Stretch only a squashed range: never move the black point above 6% or
+    # the white point below 85%, so little detail is clipped.
+    lo = min(float(np.percentile(light, 0.5)), 0.06)
+    hi = max(float(np.percentile(light, 99.5)), 0.85)
+    light = np.clip((light - lo) / (hi - lo), 0, 1)
+    med = max(float(np.median(light)), 1e-3)
+    if med < TARGET_MEDIAN:
+        light **= max(np.log(TARGET_MEDIAN) / np.log(med), MIN_GAMMA)
+    lab[..., 0] = np.clip(light * 255 + 0.5, 0, 255).astype(np.uint8)
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR), True
+
+
 def unused_name(folder: Path, stem: str, suffix: str) -> Path:
     """folder/stem+suffix, or stem-2, stem-3 ... if that name is taken."""
     p = folder / f"{stem}{suffix}"
@@ -606,7 +635,7 @@ def process(f: Path, args, tmp: Path):
     rects = find_photos(img, missed, recovered)
     cutoff = cut_off(rects, img.shape)
     stamp = scan_stamp(f)
-    names, turned = [], []
+    names, turned, brightened = [], [], []
     for i, r in enumerate(rects):
         # Cut-off photos are kept for reference but named so they aren't uploaded.
         dest = unused_name(out, f"{stamp}_{i + 1}" + ("_CUTOFF" if i in cutoff else ""), ".jpg")
@@ -614,7 +643,12 @@ def process(f: Path, args, tmp: Path):
         angle = 0 if args.no_rotate else upright_turn(photo)
         if angle:
             turned.append(f"{dest.name} {angle}°")
-        cv2.imwrite(str(dest), turn(photo, angle), [cv2.IMWRITE_JPEG_QUALITY, 95])
+        photo = turn(photo, angle)
+        if not args.no_brighten:
+            photo, lifted = brighten(photo)
+            if lifted:
+                brightened.append(dest.name)
+        cv2.imwrite(str(dest), photo, [cv2.IMWRITE_JPEG_QUALITY, 95])
         names.append(dest.name)
     if args.debug:
         cv2.imwrite(str(unused_name(out, f"{stamp}_boxes", ".jpg")),
@@ -634,6 +668,8 @@ def process(f: Path, args, tmp: Path):
           flush=True)
     if turned:
         print(f"  turned upright: {', '.join(turned)}", flush=True)
+    if brightened:
+        print(f"  brightened: {', '.join(brightened)}", flush=True)
     if missed or cutoff or not rects:
         report = write_report(out, stamp, f.name, str(kept_at), img, rects, names,
                               missed, cutoff, recovered)
@@ -793,6 +829,8 @@ def install_agent(args):
         prog.append("--debug")
     if args.no_rotate:
         prog.append("--no-rotate")
+    if args.no_brighten:
+        prog.append("--no-brighten")
     if args.upload:
         prog += ["--upload", "--album", args.album]
     # launchd starts with a bare PATH; include Homebrew so ImageMagick and
@@ -854,6 +892,8 @@ def main():
                          "remembers which were split)")
     ap.add_argument("--no-rotate", action="store_true",
                     help="don't turn sideways photos upright")
+    ap.add_argument("--no-brighten", action="store_true",
+                    help="don't brighten dark photos")
     ap.add_argument("--watch", action="store_true",
                     help="keep running and split new scans as they arrive")
     ap.add_argument("--interval", type=float, default=5,

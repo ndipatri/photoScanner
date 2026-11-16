@@ -12,7 +12,7 @@ Lay a whole album page on the scanner, with the photos still in their sleeves, a
 A small background service on the Mac does all of this:
 
 1. **Waits for scans.** It watches a folder that your scanner saves into, for example with a network printer's "Scan to Network Folder".
-2. **Splits each page.** It finds each photo on the album page, even when photos sit at slightly different spots on each page or are a little crooked. It straightens them, turns photos that were stored sideways or upside down the right way up, and saves each one as a JPEG.
+2. **Splits each page.** It finds each photo on the album page, even when photos sit at slightly different spots on each page or are a little crooked. It straightens them, turns photos that were stored sideways or upside down the right way up, brightens dark ones, and saves each one as a JPEG.
 3. **Uploads to Google Photos.** It adds the photos to an album in your Google Photos library. The script can only *add* photos. It can't see, change or delete anything else in your library.
 
 Everything runs on your Mac with ordinary image-processing code, with no AI service involved. The only place photos are sent is your own Google account.
@@ -112,6 +112,7 @@ That's it. Scan a page and check the **Photo Album Scans** album in Google Photo
   - uploads: the album you chose
 - **What it's doing:** `tail -f ~/Library/Logs/photoScanner.log`
 - **Sideways photos** are turned upright automatically when they show a face, before they're uploaded. The log shows each one, for example `turned upright: 2026-11-16_0606_1.jpg 90°`. A photo with no clear face, such as a landscape or a building, is left as scanned; rotate it in Google Photos. Auto-rotation only applies to new scans, not to photos already uploaded. To turn it off, reinstall with `--no-rotate`.
+- **Dark photos** are brightened automatically. The log lists them, for example `brightened: 2026-11-16_0740_1.jpg`. To turn it off, reinstall with `--no-brighten`.
 - **A photo didn't come out, or is cut off:** look in `~/scans/photos/` for a `<scan-time>_PROBLEM.txt` file. One is written for every scan where:
   - a photo-sized area couldn't be extracted
   - a photo is cut off by the scanner's edge
@@ -156,6 +157,7 @@ python3 split_photos.py ~/scans --watch    # keep running in this terminal
 | `--keep` | Leave scans in place instead of moving them to `done/` (a hidden `.split_photos_done` file remembers which were split) |
 | `--debug` | Also save each page with red boxes around the photos found |
 | `--no-rotate` | Don't turn sideways photos upright |
+| `--no-brighten` | Don't brighten dark photos |
 | `--watch` | Keep running and split each new scan as it arrives |
 | `--interval N` | Seconds between checks in watch mode (default 5) |
 | `--upload` | Also upload photos to Google Photos |
@@ -177,7 +179,8 @@ An album's plastic sleeve is almost colourless, while photos, even pale ones lik
    - A recovered photo that would overlap another photo, or cover more than a third of the page, is rejected and reported instead.
 5. straightens slightly tilted photos
 6. turns sideways or upside-down photos upright. It tries each quarter turn and keeps the one where a small face detector ([YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet), included in `models/`, runs on your Mac) finds upright faces. A photo with no clear face, or one that already has an upright face, is left as scanned, because leaving a photo alone is better than turning it the wrong way.
-7. saves each one as a JPEG
+7. brightens dark photos. A photo whose typical brightness is below 40% has its black and white points set and its mid-tones lifted. This changes brightness only, not colour, and the lift is capped so a night photo still looks like night. Photos that aren't dark are left exactly as scanned.
+8. saves each one as a JPEG
 
 The script finds the photos fresh on every page instead of cutting at fixed positions, so it doesn't matter if the photos sit differently from page to page.
 
@@ -188,6 +191,7 @@ The script finds the photos fresh on every page instead of cutting at fixed posi
 - Black-and-white or very faded photos may be missed, because detection is based on colour. Check with `--debug`.
 - Photos touching each other, with no sleeve gap between them, may come out as a single image.
 - Sideways photos are only turned when they show a clear face. Landscapes, buildings and photos of people seen from behind or far away stay as scanned; rotate those in Google Photos. Turn auto-rotation off with `--no-rotate`.
+- Brightening fixes exposure, not faded colour. A print with a green or orange cast keeps it. Grain in very dark areas becomes a little more visible, and a dark, high-contrast photo can look slightly washed out.
 - A photo of someone lying down can be turned so their face is upright and the rest of the scene is on its side.
 - The background service is macOS-only. On Linux, run `--watch` from a systemd user service.
 
