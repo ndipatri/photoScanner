@@ -56,7 +56,9 @@ python3 -m pip install --user -r requirements.txt   # numpy, opencv-python-headl
 Behaviour that matters when changing it:
 - Photos are named by the **scan's modification time** (`2026-11-15_1527_1.jpg`), not the PDF name, because the printer reuses names like `scan.pdf`. Existing files are never overwritten; a clash gets `-2`, `-3`.
 - Each scan that has been split is **moved to `done/`**, so the next run only sees new files. With `--keep`, a hidden `.split_photos_done` ledger records scans instead.
-- `--debug` writes `<stamp>_boxes.jpg` with red boxes around what was detected. Use it first whenever a page yields the wrong number of photos.
+- **Problem reports.** `find_photos(img, missed)` also returns photo-sized blobs that it skipped: at least 2% of the page, but filling less than 80% of their `minAreaRect`. When there are any, or when no photos are found, `process()` writes `photos/<stamp>_PROBLEM.txt` and `photos/<stamp>_PROBLEM_boxes.jpg` (extracted photos in red, missed ones in yellow). An unreadable scan also gets a report. In watch mode, that report is deleted if the scan later splits successfully, for example once a half-arrived file finishes arriving. The uploader skips anything with `_boxes` in its name, and `.txt` files are never uploaded. Check these reports first when the user says a photo is missing.
+- In the real scans, every missed photo had the same cause. Its blob was rejected for a low fill ratio, either because the top photo merged with the sleeve's yellowed top edge, or because pale sky or snow along an edge notched the outline. Improving detection should target exactly that.
+- `--debug` writes `<stamp>_boxes.jpg` with the same red and yellow boxes, even for pages that split fine.
 - Known limits: black-and-white or very faded photos may be missed (detection is colour-based), photos touching each other merge into one, and photos stored sideways stay sideways.
 
 To test detection changes, run on a copy and look at the crops. Don't test on the live `~/scans`, because the scans get moved:
@@ -105,7 +107,7 @@ This always runs a fresh browser sign-in, even if an older sign-in is still vali
 |---|---|
 | Printer "Save and Test" fails | macOS firewall blocking `smbd` (System Settings → Network → Firewall → Options → allow File Sharing). Then check SMB is on for the user. See `references/printer-and-mac.md`. |
 | Bottom photo cut off | Album page is longer than Letter size. Set the scan size to **A4** (the M477 glass maxes out at A4; Legal only works in the document feeder). |
-| Page yields fewer photos than expected | Run with `--debug` and inspect `_boxes.jpg`; usually a faded or B&W photo, or two photos touching. |
+| Page yields fewer photos than expected | Read `photos/<stamp>_PROBLEM.txt` and its `_PROBLEM_boxes.jpg`. Usually the photo merged with the sleeve edge or has a pale edge; otherwise a faded or B&W photo, or two photos touching. |
 | Log: `not signed in` / `sign-in expired` | Run `--photos-login`. If it expires weekly, the app is still in **Testing**; publish it (`references/google-cloud.md`). |
 | Browser: "Access blocked … has not completed the Google verification process" (403 access_denied) | App is in Testing and the account isn't a test user, or the app isn't published. |
 | `Failed to resolve 'oauth2.googleapis.com'` | Flaky ISP DNS; the retry wrapper handles it. If it lasts more than 5 minutes, try again later. |

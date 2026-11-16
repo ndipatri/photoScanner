@@ -63,8 +63,11 @@ def load_page(path: Path, tmp: Path):
     return img
 
 
-def find_photos(img):
-    """Return rotated rectangles (cv2.minAreaRect) for each photo, in full-res coords."""
+def find_photos(img, missed=None):
+    """Return rotated rectangles (cv2.minAreaRect) for each photo, in full-res coords.
+
+    If `missed` is a list, photo-sized regions that were *not* extracted are
+    appended to it as dicts (rect, area_frac, fill), so they can be reported."""
     scale = DETECT_WIDTH / img.shape[1]
     small = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     hsv = cv2.cvtColor(cv2.medianBlur(small, 7), cv2.COLOR_BGR2HSV)
@@ -82,12 +85,18 @@ def find_photos(img):
         if area < MIN_AREA_FRAC * page_area:
             continue
         (cx, cy), (w, h), ang = cv2.minAreaRect(c)
+        full = ((cx / scale, cy / scale), (w / scale, h / scale), ang)
         if area / (w * h) < MIN_FILL:
+            if missed is not None:
+                missed.append({"rect": full, "area_frac": area / page_area,
+                               "fill": area / (w * h)})
             continue
-        rects.append(((cx / scale, cy / scale), (w / scale, h / scale), ang))
+        rects.append(full)
     # Top-to-bottom, then left-to-right for photos side by side.
     row_tol = img.shape[0] * 0.05
     rects.sort(key=lambda r: (round(r[0][1] / row_tol), r[0][0]))
+    if missed is not None:
+        missed.sort(key=lambda m: (round(m["rect"][0][1] / row_tol), m["rect"][0][0]))
     return rects
 
 
@@ -139,12 +148,138 @@ def gather(inputs):
     return files
 
 
+def draw_boxes(img, rects, missed=()):
+    """Copy of the page with extracted photos boxed in red (numbered) and
+    skipped photo-sized regions in yellow (labelled MISSED n)."""
+    dbg = img.copy()
+    font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 3.0, 8
+
+    def box(rect, colour, label):
+        pts = cv2.boxPoints(rect).astype(np.int32)
+        cv2.drawContours(dbg, [pts], 0, colour, 10)
+        # Keep the label on the page even when the box starts above or left of it.
+        x = max(pts[:, 0].min(), 0) + 20
+        y = max(pts[:, 1].min(), 0) + 110
+        cv2.putText(dbg, label, (int(x), int(y)), font, scale, (0, 0, 0), thick + 8)
+        cv2.putText(dbg, label, (int(x), int(y)), font, scale, colour, thick)
+
+    for i, r in enumerate(rects, 1):
+        box(r, (0, 0, 255), str(i))
+    for i, m in enumerate(missed, 1):
+        box(m["rect"], (0, 200, 255), f"MISSED {i}")
+    return dbg
+
+
+def _where(rect, shape):
+    """'top', 'middle' or 'bottom' (plus left/right if off-centre) of the page."""
+    (cx, cy), _, _ = rect
+    h, w = shape[:2]
+    v = "top" if cy < h / 3 else "bottom" if cy > 2 * h / 3 else "middle"
+    hz = " left" if cx < w / 3 else " right" if cx > 2 * w / 3 else ""
+    return v + hz
+
+
+def _upright_size(rect):
+    """(width, height) of a rotated rect as it will look once straightened."""
+    _, (w, h), ang = rect
+    while ang > 45:
+        ang -= 90
+        w, h = h, w
+    while ang < -45:
+        ang += 90
+        w, h = h, w
+    return w, h
+
+
+def _size_text(rect):
+    w, h = _upright_size(rect)
+    return f"{int(w)}x{int(h)} px, about {w / DPI:.1f} x {h / DPI:.1f} in"
+
+
+def _touches_edge(rect, shape, margin=0.01):
+    pts = cv2.boxPoints(rect)
+    h, w = shape[:2]
+    return (pts[:, 0].min() < w * margin or pts[:, 1].min() < h * margin
+            or pts[:, 0].max() > w * (1 - margin) or pts[:, 1].max() > h * (1 - margin))
+
+
+def write_report(out: Path, stamp: str, source: str, kept_at: str, img=None,
+                 rects=(), names=(), missed=(), error=None):
+    """Write <stamp>_PROBLEM.txt (and a marked-up page image) explaining a
+    scan whose photos weren't all extracted. Returns the report path."""
+    report = unused_name(out, f"{stamp}_PROBLEM", ".txt")
+    boxes = None
+    if img is not None:
+        boxes = report.with_name(report.stem + "_boxes.jpg")
+        cv2.imwrite(str(boxes), draw_boxes(img, rects, missed),
+                    [cv2.IMWRITE_JPEG_QUALITY, 80])
+
+    lines = [
+        "photoScanner: some photos on this scan were NOT extracted",
+        "=" * 58,
+        "",
+        f"Scan file:     {source}",
+        f"Scan kept at:  {kept_at}",
+        f"Scanned:       {stamp[:10]} {stamp[11:13]}:{stamp[13:15]}",
+        f"Checked:       {datetime.now():%Y-%m-%d %H:%M}",
+    ]
+    if boxes:
+        lines.append(f"Marked-up page: {boxes.name}  "
+                     "(red = extracted, yellow = missed)")
+    lines.append("")
+
+    if error:
+        lines += ["PROBLEM", f"  The scan couldn't be read: {error}",
+                  "  It was probably still being written, or the file is damaged.",
+                  "  It stays in the scans folder and is retried if it changes;",
+                  "  otherwise scan the page again.", ""]
+    else:
+        lines.append(f"EXTRACTED ({len(names)})")
+        for n, r in zip(names, rects):
+            lines.append(f"  {n}  {_where(r, img.shape)}, {_size_text(r)}")
+        if not names:
+            lines.append("  none")
+        lines.append("")
+
+        lines.append(f"MISSED ({len(missed)})")
+        if not missed:
+            lines += ["  No photo-sized region was found at all. The page may be",
+                      "  blank, or every photo is black-and-white / very faded",
+                      "  (detection relies on colour)."]
+        for i, m in enumerate(missed, 1):
+            r = m["rect"]
+            lines.append(f"  {i}. {_where(r, img.shape)} of the page, {_size_text(r)} "
+                         f"({m['area_frac'] * 100:.0f}% of the page)")
+            lines.append(f"     Its outline only fills {m['fill'] * 100:.0f}% of its bounding "
+                         f"box; a photo must fill {MIN_FILL * 100:.0f}%.")
+            if _touches_edge(r, img.shape):
+                lines.append("     It touches the edge of the scan, so it may be cut off "
+                             "or merged with the album page's edge.")
+            lines.append("     Likely cause: the photo's outline joins the album "
+                         "sleeve's coloured edge, or has pale sky/snow along one side.")
+        lines.append("")
+
+    lines += [
+        "WHAT TO DO",
+        "  - Rescan the page, shifted slightly away from the scanner's edges.",
+        "  - Or crop the missed photo by hand from the scan above.",
+        "  - To see the detection again:",
+        f"      python3 split_photos.py \"{kept_at}\" --keep --debug -o /tmp/check",
+        "",
+        "This file and the marked-up image are not uploaded to Google Photos;",
+        "delete them once you've dealt with the scan.",
+    ]
+    report.write_text("\n".join(lines) + "\n")
+    return report
+
+
 def process(f: Path, args, tmp: Path):
     """Split one scan into photos; move it to done/ unless --keep."""
     out = Path(args.out).expanduser() if args.out else f.parent / "photos"
     out.mkdir(parents=True, exist_ok=True)
     img = load_page(f, tmp)
-    rects = find_photos(img)
+    missed = []
+    rects = find_photos(img, missed)
     stamp = scan_stamp(f)
     names = []
     for i, r in enumerate(rects, 1):
@@ -152,12 +287,9 @@ def process(f: Path, args, tmp: Path):
         cv2.imwrite(str(dest), crop_rect(img, r), [cv2.IMWRITE_JPEG_QUALITY, 95])
         names.append(dest.name)
     if args.debug:
-        dbg = img.copy()
-        for r in rects:
-            box = cv2.boxPoints(r).astype(np.int32)
-            cv2.drawContours(dbg, [box], 0, (0, 0, 255), 8)
-        cv2.imwrite(str(unused_name(out, f"{stamp}_boxes", ".jpg")), dbg)
-    moved = ""
+        cv2.imwrite(str(unused_name(out, f"{stamp}_boxes", ".jpg")),
+                    draw_boxes(img, rects, missed))
+    moved, kept_at = "", f
     if args.keep:
         ledger_add(f)
     else:
@@ -165,11 +297,24 @@ def process(f: Path, args, tmp: Path):
         done.mkdir(exist_ok=True)
         target = unused_name(done, f.stem, f.suffix)
         shutil.move(str(f), str(target))
-        moved = f", moved to done/{target.name}"
+        moved, kept_at = f", moved to done/{target.name}", target
     print(f"{f.name}: {len(rects)} photo(s) -> {', '.join(names) or 'none'}{moved}",
           flush=True)
-    if not rects:
-        print("  (no photos found; try --debug to see why)", flush=True)
+    if missed or not rects:
+        report = write_report(out, stamp, f.name, str(kept_at), img, rects, names, missed)
+        print(f"  {len(missed) or 'some'} photo(s) not extracted; see {report.name}",
+              flush=True)
+
+
+def report_unreadable(f: Path, args, error):
+    """Write a problem report for a scan that couldn't be read at all."""
+    out = Path(args.out).expanduser() if args.out else f.parent / "photos"
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        stamp = scan_stamp(f)
+    except OSError:
+        stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+    return write_report(out, stamp, f.name, str(f), error=str(error))
 
 
 # With --keep, scans stay in place, so remember which ones were split in a
@@ -249,6 +394,7 @@ def watch(args, tmp: Path):
     arriving (same size and time on two checks in a row)."""
     last_seen = {}   # path -> (size, mtime) at previous check
     failed = {}      # path -> (size, mtime) when it last failed
+    reports = {}     # path -> problem report written for an unreadable scan
     uploader = Uploader(args)
     where = ", ".join(str(Path(p).expanduser()) for p in args.inputs)
     extra = f', uploading to Google Photos album "{args.album}"' if args.upload else ""
@@ -269,10 +415,18 @@ def watch(args, tmp: Path):
             try:
                 process(f, args, tmp)
                 failed.pop(f, None)
+                stale = reports.pop(f, None)   # it worked after all
+                if stale:
+                    stale.unlink(missing_ok=True)
             except Exception as e:  # keep watching even if one scan is bad
                 failed[f] = sig
                 print(f"{f.name}: could not split ({e}); will retry if it changes",
                       flush=True)
+                if f not in reports:
+                    try:
+                        reports[f] = report_unreadable(f, args, e)
+                    except Exception:
+                        pass
         last_seen = current
         time.sleep(args.interval)
 
@@ -401,6 +555,10 @@ def main():
                 process(f, args, Path(tmp))
             except Exception as e:
                 print(f"{f.name}: could not split ({e})")
+                try:
+                    print(f"  see {report_unreadable(f, args, e).name}")
+                except Exception:
+                    pass
         if args.upload:
             try:
                 upload(args)

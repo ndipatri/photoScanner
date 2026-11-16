@@ -110,6 +110,13 @@ That's it. Scan a page and check the **Photo Album Scans** album in Google Photo
   - split scans: `~/scans/done/`
   - uploads: the album you chose
 - **What it's doing:** `tail -f ~/Library/Logs/photoScanner.log`
+- **A photo didn't come out:** look in `~/scans/photos/` for a `<scan-time>_PROBLEM.txt` file. One is written for every scan where a photo-sized area was skipped, no photos were found, or the file couldn't be read. It says:
+  - which scan it was and where that file is now
+  - what was extracted
+  - where on the page each missed photo is, its size, and why it was skipped
+  - what to do about it
+
+  Next to it, `<scan-time>_PROBLEM_boxes.jpg` shows the page with extracted photos boxed in red and missed ones in yellow. Neither file is uploaded. Delete them once you've rescanned the page or cropped the photo by hand.
 - **A page split wrong:** run `python3 split_photos.py ~/scans/done/scan-3.pdf --keep --debug -o /tmp/check` on the scan in question. `/tmp/check` then contains the crops, plus a picture of the page with red boxes around the photos it found.
 - **The log says you're not signed in:** run `python3 split_photos.py --photos-login` again.
 - **Different album:** reinstall with `--album "Grandma's album"`. The script creates the album the first time it uploads to it.
@@ -158,6 +165,7 @@ The script finds the photos fresh on every page instead of cutting at fixed posi
 
 ## Limitations
 
+- A photo whose outline runs into the album sleeve's yellowed edge, or that has pale sky or snow along one edge, can be skipped. You'll get a `_PROBLEM.txt` report when that happens.
 - Black-and-white or very faded photos may be missed, because detection is based on colour. Check with `--debug`.
 - Photos touching each other, with no sleeve gap between them, may come out as a single image.
 - Photos stored sideways in the album come out sideways. Rotate them in Google Photos.
