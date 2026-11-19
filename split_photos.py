@@ -237,6 +237,216 @@ def _recover(hsv, gray, c, page_area):
     return None
 
 
+# ---- flip albums: photos in a stack of overlapping pockets ------------------
+# In a flip ("pocket") album each print sits in a pink/white pocket, and the
+# pockets overlap like shingles: only the top photo of each stack is fully
+# visible, with thin strips of the pockets behind it. Colour alone merges the
+# whole stack (and the album cover) into one big blob. Inside such a blob each
+# visible photo is a rectangle bounded by four long straight edges, with
+# photo content inside and flat mat, sleeve or cover around it.
+STACK_MIN_FRAC = 0.40     # a "photo" bigger than this may be a pocket stack
+POCKET_MIN_IN = 2.5       # side lengths (inches) of the photos searched for
+POCKET_MAX_IN = 8.5
+LINE_TOL = 3              # px a border may wander off straight (~0.7° tilt)
+SIDE_SUPPORT = 0.7        # fraction of a side that must lie on an edge
+POCKET_LINE = 0.85        # an inner line this complete, with mat beside it,
+CLEAN_LINE = 0.95         # (or this complete on its own) is a pocket boundary
+MAT_PENALTY = 3.0         # score: photo pixel +1, mat pixel -MAT_PENALTY
+MAX_MAT_FRAC = 0.25       # a pocket photo may contain at most this much "mat"
+LEFTOVER_MIN_IN2 = 1.5    # photo content left over at the scan's edge is reported...
+LEFTOVER_MIN_SIDE_IN = 1.5  # ...if at least this wide both ways (not a pocket strip)
+STACK_SHINGLES = 10       # this many long parallel edges across a blob = a stack
+SINGLE_PRINT_SIDES = 0.6  # a big blob straight-edged this well all round is one print
+
+
+def _longest_run(b):
+    d = np.diff(np.r_[0, b.astype(np.int8), 0])
+    starts, ends = np.where(d == 1)[0], np.where(d == -1)[0]
+    return int((ends - starts).max()) if len(starts) else 0
+
+
+def _line_positions(edge, lo, hi, a0, a1, minlen):
+    """Rows in [lo, hi) of `edge` with a straight run at least `minlen` long
+    within columns [a0, a1); neighbouring rows merge to their strongest one."""
+    out, grp = [], []
+    for p in list(range(lo, hi)) + [None]:
+        n = _longest_run(edge[p, a0:a1] > 0) if p is not None else 0
+        if n >= minlen and (not grp or p - grp[-1][0] <= 3):
+            grp.append((p, n))
+            continue
+        if grp:
+            out.append(max(grp, key=lambda t: t[1])[0])
+        grp = [(p, n)] if n >= minlen else []
+    return out
+
+
+class _Stack:
+    """A big blob straightened by its angle, with the maps the pocket finder
+    uses. Boxes are (left, right, top, bottom) in the straightened frame."""
+
+    def __init__(self, small, contour, ppi):
+        self.shape, self.ppi = small.shape, ppi
+        (cx, cy), (w, h), self.angle = _upright(cv2.minAreaRect(contour))
+        self.M = cv2.getRotationMatrix2D((cx, cy), self.angle, 1.0)
+        W, H = small.shape[1], small.shape[0]
+        col = cv2.warpAffine(small, self.M, (W, H), borderValue=(255, 255, 255))
+        region = np.zeros((H, W), np.uint8)
+        cv2.drawContours(region, [contour], 0, 255, -1)
+        self.region = cv2.warpAffine(region, self.M, (W, H), flags=cv2.INTER_NEAREST) > 0
+        g = cv2.GaussianBlur(cv2.cvtColor(col, cv2.COLOR_BGR2GRAY), (3, 3), 0).astype(np.float32)
+        eh = (np.abs(cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)) / 4 > EDGE_T).astype(np.uint8)
+        ev = (np.abs(cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)) / 4 > EDGE_T).astype(np.uint8)
+        eh = cv2.morphologyEx(eh, cv2.MORPH_CLOSE, np.ones((1, 9), np.uint8))
+        ev = cv2.morphologyEx(ev, cv2.MORPH_CLOSE, np.ones((9, 1), np.uint8))
+        k = 2 * LINE_TOL + 1
+        self.eh = cv2.dilate(eh, np.ones((k, 1), np.uint8))
+        self.ev = cv2.dilate(ev, np.ones((1, k), np.uint8))
+
+        def local_sd(n):
+            mu = cv2.blur(g, (n, n))
+            return np.sqrt(np.maximum(cv2.blur(g * g, (n, n)) - mu * mu, 0))
+        hsv = cv2.cvtColor(cv2.medianBlur(col, 5), cv2.COLOR_BGR2HSV)
+        hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        self.flat = local_sd(7) < 3.5
+        self.pink = self.flat & (hue >= 3) & (hue <= 22) & (sat >= 30) & (sat <= 140) & (val >= 150)
+        # Mat = what surrounds a pocket photo: flat pink mat, flat pale sleeve
+        # or glare, flat dark cover.
+        flat15 = local_sd(15) < 4
+        mat = flat15 & (self.pink | ((sat < 40) & (val > 200)) | (val < 60))
+        self.mat = mat
+        self.plain = mat | (flat15 & (sat < 40))   # also flat grey: the scanner lid, the page
+        self.score_ii = cv2.integral(np.where(mat, -MAT_PENALTY, 1.0))
+        self.mat_ii = cv2.integral(mat.astype(np.float64))
+
+        self.blob = (max(cx - w / 2, 0), min(cx + w / 2, W - 1),
+                     max(cy - h / 2, 0), min(cy + h / 2, H - 1))
+        x0, x1, y0, y1 = (int(v) for v in self.blob)
+        minlen = 0.5 * POCKET_MIN_IN * ppi
+        self.ys = _line_positions(eh, y0, y1 + 1, x0, x1 + 1, minlen)
+        self.xs = _line_positions(ev.T, x0, x1 + 1, y0, y1 + 1, minlen)
+        self.band = max(int(0.12 * ppi), 3)
+
+    def _hsup(self, y, xa, xb):
+        return float(self.eh[int(y), int(xa):int(xb)].mean()) if xb > xa else 0.0
+
+    def _vsup(self, x, ya, yb):
+        return float(self.ev[int(ya):int(yb), int(x)].mean()) if yb > ya else 0.0
+
+    def _mat_beside(self, a, b):
+        return any(self.pink[s].mean() >= 0.25 or self.flat[s].mean() >= 0.8 for s in (a, b))
+
+    def pocket_line_inside(self, l, r, t, b):
+        """Does a pocket boundary (a near-complete straight line with mat
+        beside it) cross the box? Lines in the photo itself (door frames,
+        shelves) seldom have flat mat along them."""
+        mx, my, m, e = (r - l) * 0.1, (b - t) * 0.1, 0.15 * self.ppi, self.band
+        L, R, T, B = int(l), int(r), int(t), int(b)
+        for y in self.ys:
+            if t + m < y < b - m:
+                s = self._hsup(y, l + mx, r - mx)
+                if s >= CLEAN_LINE or s >= POCKET_LINE and self._mat_beside(
+                        (slice(y - e, y - 2), slice(L, R)), (slice(y + 2, y + e), slice(L, R))):
+                    return True
+        for x in self.xs:
+            if l + m < x < r - m:
+                s = self._vsup(x, t + my, b - my)
+                if s >= CLEAN_LINE or s >= POCKET_LINE and self._mat_beside(
+                        (slice(T, B), slice(x - e, x - 2)), (slice(T, B), slice(x + 2, x + e))):
+                    return True
+        return False
+
+    def _outline_support(self):
+        """Weakest of the blob's four sides: how much of it lies on a straight
+        edge (searched within 0.1 in of the side)."""
+        l, r, t, b = self.blob
+        mx, my, d = (r - l) * 0.1, (b - t) * 0.1, int(0.1 * self.ppi)
+        H, W = self.eh.shape
+
+        def best(fn, at, limit, a, z):
+            return max((fn(v, a, z) for v in range(max(int(at) - d, 0), min(int(at) + d, limit - 1))),
+                       default=0.0)
+        return min(best(self._hsup, t, H, l + mx, r - mx), best(self._hsup, b, H, l + mx, r - mx),
+                   best(self._vsup, l, W, t + my, b - my), best(self._vsup, r, W, t + my, b - my))
+
+    def is_stack(self, fill):
+        """A single big print (an 8x10) is a filled rectangle with a straight
+        edge all round. A pocket stack's outline is ragged on at least one
+        side, and it has pocket edges inside, many of them parallel like
+        shingles (each crossing at least half the blob)."""
+        if fill >= 0.9 and self._outline_support() >= SINGLE_PRINT_SIDES:
+            return False
+        if self.pocket_line_inside(*self.blob):
+            return True
+        l, r, t, b = self.blob
+        mx, my = (r - l) * 0.1, (b - t) * 0.1
+        shingles = sum(self._hsup(y, l + mx, r - mx) >= 0.5 for y in self.ys) + \
+            sum(self._vsup(x, t + my, b - my) >= 0.5 for x in self.xs)
+        return shingles >= STACK_SHINGLES
+
+    def _sum(self, ii, l, r, t, b):
+        l, r, t, b = int(l), int(r), int(t), int(b)
+        return ii[b, r] - ii[t, r] - ii[b, l] + ii[t, l]
+
+    def photos(self):
+        """Boxes of the fully visible photos: four supported sides, no pocket
+        boundary inside, mostly photo content. Best-scoring first, no overlaps."""
+        lo, hi = POCKET_MIN_IN * self.ppi, POCKET_MAX_IN * self.ppi
+        cands = []
+        for i, t in enumerate(self.ys):
+            for b in self.ys[i + 1:]:
+                if not lo <= b - t <= hi:
+                    continue
+                m = (b - t) * 0.1
+                sides = [x for x in self.xs if self._vsup(x, t + m, b - m) >= SIDE_SUPPORT]
+                for j, l in enumerate(sides):
+                    for r in sides[j + 1:]:
+                        if not lo <= r - l <= hi:
+                            continue
+                        mx = (r - l) * 0.1
+                        if self._hsup(t, l + mx, r - mx) < SIDE_SUPPORT or \
+                                self._hsup(b, l + mx, r - mx) < SIDE_SUPPORT:
+                            continue
+                        box = (l, r, t, b)
+                        if self._sum(self.mat_ii, *box) > MAX_MAT_FRAC * (r - l) * (b - t):
+                            continue
+                        if not self.pocket_line_inside(*box):
+                            cands.append((self._sum(self.score_ii, *box), box))
+        chosen = []
+        for _, (l, r, t, b) in sorted(cands, key=lambda c: -c[0]):
+            if all(min(r, R) - max(l, L) <= 4 or min(b, B) - max(t, T) <= 4
+                   for L, R, T, B in chosen):
+                chosen.append((l, r, t, b))
+        return chosen
+
+    def to_page(self, box):
+        """Straightened-frame box -> rotated rect in detection coordinates."""
+        l, r, t, b = box
+        c = cv2.invertAffineTransform(self.M) @ np.array([(l + r) / 2, (t + b) / 2, 1.0])
+        return (float(c[0]), float(c[1])), (float(r - l), float(b - t)), self.angle
+
+    def leftovers(self, boxes):
+        """Photo content in the stack outside `boxes` that reaches the scan's
+        edge: a photo lying partly off the glass. Thin pocket strips and
+        photos tucked under others away from the edge are ignored."""
+        content = (self.region & ~self.plain).astype(np.uint8) * 255
+        pad = int(0.1 * self.ppi)
+        for l, r, t, b in boxes:
+            content[max(int(t) - pad, 0):int(b) + pad, max(int(l) - pad, 0):int(r) + pad] = 0
+        k = max(int(0.4 * self.ppi), 3)
+        content = cv2.morphologyEx(content, cv2.MORPH_OPEN, np.ones((k, k), np.uint8))
+        cs, _ = cv2.findContours(content, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        out = []
+        for c in cs:
+            x, y, w, h = cv2.boundingRect(c)
+            if cv2.contourArea(c) < LEFTOVER_MIN_IN2 * self.ppi ** 2 or \
+                    min(w, h) < LEFTOVER_MIN_SIDE_IN * self.ppi:
+                continue
+            rect = self.to_page((x, x + w, y, y + h))
+            if _touches_edge(rect, self.shape):
+                out.append((rect, cv2.contourArea(c)))
+        return out
+
+
 def _touches_edge(rect, shape, margin=0.01):
     """Does the rotated rect reach within `margin` of the image border?"""
     pts = cv2.boxPoints(rect)
@@ -274,14 +484,16 @@ def _overlap(r1, r2):
     return cv2.contourArea(pts) if ret != cv2.INTERSECT_NONE and pts is not None else 0.0
 
 
-def find_photos(img, missed=None, recovered=None):
+def find_photos(img, missed=None, recovered=None, pocketed=None):
     """Return rotated rectangles (cv2.minAreaRect) for each photo, in full-res coords.
 
     Blobs that aren't rectangular enough (a photo merged with the sleeve edge,
-    or with pale sky/snow along a side) go through _recover(). If `recovered`
-    is a list, the indexes (in the returned order) of photos found that way are
-    stored in it. If `missed` is a list, photo-sized regions that still couldn't
-    be extracted are appended as dicts (rect, area_frac, fill) for reporting."""
+    or with pale sky/snow along a side) go through _recover(); very big blobs
+    that turn out to be a flip album's pocket stack go through _Stack. If
+    `recovered` / `pocketed` are lists, the indexes (in the returned order) of
+    photos found those ways are stored in them. If `missed` is a list,
+    photo-sized regions that still couldn't be extracted are appended as dicts
+    (rect, kind, area_frac, fill) for reporting."""
     scale = DETECT_WIDTH / img.shape[1]
     small = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
     hsv = cv2.cvtColor(cv2.medianBlur(small, 7), cv2.COLOR_BGR2HSV)
@@ -290,7 +502,7 @@ def find_photos(img, missed=None, recovered=None):
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     page_area = mask.shape[0] * mask.shape[1]
-    good, fixed, lost, slivers = [], [], [], []
+    good, fixed, lost, slivers, pockets, extra_missed = [], [], [], [], [], []
     for c in contours:
         area = cv2.contourArea(c)
         if area < MIN_AREA_FRAC * page_area:
@@ -300,6 +512,16 @@ def find_photos(img, missed=None, recovered=None):
                     and _looks_like_photo_piece(hsv, c, mask.shape):
                 slivers.append(c)
             continue
+        if area > STACK_MIN_FRAC * page_area:
+            stack = _Stack(small, c, page_dpi * scale)
+            if stack.is_stack(_fill(c)):
+                boxes = stack.photos()
+                pockets.extend(stack.to_page(b) for b in boxes)
+                for r, a in stack.leftovers(boxes):
+                    extra_missed.append((r, "partly-off", a / page_area, 1.0))
+                if not boxes:
+                    extra_missed.append((cv2.minAreaRect(c), "stack", area / page_area, _fill(c)))
+                continue
         if _fill(c) >= MIN_FILL:
             good.append(cv2.minAreaRect(c))
             continue
@@ -318,7 +540,9 @@ def find_photos(img, missed=None, recovered=None):
             lost.append(c)
         else:
             good.append(r)
+    good.extend(pockets)
     fixed_ids = {id(r) for r, _ in fixed}
+    pocket_ids = {id(r) for r in pockets}
 
     def to_full(r):
         (cx, cy), (w, h), ang = r
@@ -326,15 +550,20 @@ def find_photos(img, missed=None, recovered=None):
 
     row_tol = img.shape[0] * 0.05
     key = lambda r: (round(r[0][1] / row_tol), r[0][0])
-    pairs = sorted(((to_full(r), id(r) in fixed_ids) for r in good), key=lambda p: key(p[0]))
-    rects = [r for r, _ in pairs]
+    triples = sorted(((to_full(r), id(r) in fixed_ids, id(r) in pocket_ids) for r in good),
+                     key=lambda p: key(p[0]))
+    rects = [r for r, _, _ in triples]
     if recovered is not None:
-        recovered.extend(i for i, (_, was_fixed) in enumerate(pairs) if was_fixed)
+        recovered.extend(i for i, (_, was_fixed, _) in enumerate(triples) if was_fixed)
+    if pocketed is not None:
+        pocketed.extend(i for i, (_, _, in_pocket) in enumerate(triples) if in_pocket)
     if missed is not None:
         for kind, cs in (("irregular", lost), ("off-scanner", slivers)):
             for c in cs:
                 missed.append({"rect": to_full(cv2.minAreaRect(c)), "kind": kind,
                                "area_frac": cv2.contourArea(c) / page_area, "fill": _fill(c)})
+        for r, kind, frac, fill in extra_missed:
+            missed.append({"rect": to_full(r), "kind": kind, "area_frac": frac, "fill": fill})
         missed.sort(key=lambda m: key(m["rect"]))
     return rects
 
@@ -542,7 +771,8 @@ def _size_text(rect):
 
 
 def write_report(out: Path, stamp: str, source: str, kept_at: str, img=None,
-                 rects=(), names=(), missed=(), cutoff=(), recovered=(), error=None):
+                 rects=(), names=(), missed=(), cutoff=(), recovered=(), error=None,
+                 pocketed=()):
     """Write <stamp>_PROBLEM.txt (and a marked-up page image) explaining a
     scan whose photos weren't all extracted cleanly. Returns the report path."""
     report = unused_name(out, f"{stamp}_PROBLEM", ".txt")
@@ -577,7 +807,8 @@ def write_report(out: Path, stamp: str, source: str, kept_at: str, img=None,
             if i in cutoff:
                 continue
             note = "  (recovered: outline merged with sleeve or pale edge; check the crop)" \
-                if i in recovered else ""
+                if i in recovered else \
+                "  (found in a flip album's pocket stack; check the crop)" if i in pocketed else ""
             lines.append(f"  {n}  {_where(r, img.shape)}, {_size_text(r)}{note}")
         if len(names) == len(cutoff):
             lines.append("  none")
@@ -604,6 +835,13 @@ def write_report(out: Path, stamp: str, source: str, kept_at: str, img=None,
             if m.get("kind") == "off-scanner":
                 lines.append("     Only a small piece is on the scan, at its edge: the photo")
                 lines.append("     was probably lying mostly off the scanner glass.")
+            elif m.get("kind") == "partly-off":
+                lines.append("     A photo in a flip album's pocket stack runs off the edge of")
+                lines.append("     the scan: it was probably lying partly off the scanner glass.")
+            elif m.get("kind") == "stack":
+                lines.append("     This looks like a flip album's stack of overlapping pockets,")
+                lines.append("     but no fully visible photo with four clear edges was found")
+                lines.append("     in it, so nothing was extracted from it.")
             else:
                 lines.append(f"     Its outline only fills {m['fill'] * 100:.0f}% of its bounding "
                              f"box (a photo should fill {MIN_FILL * 100:.0f}%), and it")
@@ -631,8 +869,8 @@ def process(f: Path, args, tmp: Path):
     out = Path(args.out).expanduser() if args.out else f.parent / "photos"
     out.mkdir(parents=True, exist_ok=True)
     img = load_page(f, tmp)
-    missed, recovered = [], []
-    rects = find_photos(img, missed, recovered)
+    missed, recovered, pocketed = [], [], []
+    rects = find_photos(img, missed, recovered, pocketed)
     cutoff = cut_off(rects, img.shape)
     stamp = scan_stamp(f)
     names, turned, brightened = [], [], []
@@ -662,7 +900,9 @@ def process(f: Path, args, tmp: Path):
         target = unused_name(done, f.stem, f.suffix)
         shutil.move(str(f), str(target))
         moved, kept_at = f", moved to done/{target.name}", target
-    extra = f" ({len(recovered)} recovered)" if recovered else ""
+    extra = ", ".join(s for s in (f"{len(recovered)} recovered" if recovered else "",
+                                  f"{len(pocketed)} from a pocket stack" if pocketed else "") if s)
+    extra = f" ({extra})" if extra else ""
     print(f"{f.name}: {len(rects) - len(cutoff)} photo(s){extra} -> "
           f"{', '.join(n for i, n in enumerate(names) if i not in cutoff) or 'none'}{moved}",
           flush=True)
@@ -672,7 +912,7 @@ def process(f: Path, args, tmp: Path):
         print(f"  brightened: {', '.join(brightened)}", flush=True)
     if missed or cutoff or not rects:
         report = write_report(out, stamp, f.name, str(kept_at), img, rects, names,
-                              missed, cutoff, recovered)
+                              missed, cutoff, recovered, pocketed=pocketed)
         problems = [f"{len(cutoff)} cut off" if cutoff else "",
                     f"{len(missed)} missed" if missed else "",
                     "none found" if not rects and not missed else ""]

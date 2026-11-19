@@ -177,6 +177,7 @@ An album's plastic sleeve is almost colourless, while photos, even pale ones lik
    - **A photo that merged with the sleeve's yellowed edge** is separated again with stricter colour thresholds.
    - **A photo with pale sky or snow along a side**, where colour can't tell photo from sleeve, has its box snapped outward to the photo's straight border.
    - A recovered photo that would overlap another photo, or cover more than a third of the page, is rejected and reported instead.
+   - **A flip album's pocket stack**, where each print sits in an overlapping pocket and only the top photo of each stack is fully visible, merges with the pockets behind it and the album cover into one big shape. Inside it, each visible photo is found as a rectangle with a long straight edge on all four sides, photo content inside and no pocket edge across it. The strips of the pockets behind it are ignored. A single big print, such as an 8 × 10, has a straight edge all round and is kept whole.
 5. straightens slightly tilted photos
 6. turns sideways or upside-down photos upright. It tries each quarter turn and keeps the one where a small face detector ([YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet), included in `models/`, runs on your Mac) finds upright faces. A photo with no clear face, or one that already has an upright face, is left as scanned, because leaving a photo alone is better than turning it the wrong way.
 7. brightens dark photos. A photo whose typical brightness is below 40% has its black and white points set and its mid-tones lifted. This changes brightness only, not colour, and the lift is capped so a night photo still looks like night. Photos that aren't dark are left exactly as scanned.
@@ -193,6 +194,7 @@ The script finds the photos fresh on every page instead of cutting at fixed posi
 - Sideways photos are only turned when they show a clear face. Landscapes, buildings and photos of people seen from behind or far away stay as scanned; rotate those in Google Photos. Turn auto-rotation off with `--no-rotate`.
 - Brightening fixes exposure, not faded colour. A print with a green or orange cast keeps it. Grain in very dark areas becomes a little more visible, and a dark, high-contrast photo can look slightly washed out.
 - A photo of someone lying down can be turned so their face is upright and the rest of the scene is on its side.
+- Flip-album (pocket) pages were tuned on only two pages of one album, with pink pockets. Only fully visible photos come out; photos tucked under others come out when you flip to them. A photo whose pocket edge has low contrast can be missed or include a strip of pocket, and a photo in a pocket stack that runs off the glass is reported instead of cropped.
 - The background service is macOS-only. On Linux, run `--watch` from a systemd user service.
 
 ## Files on your Mac
