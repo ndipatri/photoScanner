@@ -256,6 +256,14 @@ SKEW_MAX = 3.0            # the stack is straightened first, by up to this many 
 INNER_MARGIN_IN = 0.15    # lines this close inside a side are its own double edge
 COVER_V = 0.0             # dark, grey, finely textured: the album cover
 COVER_SD = 12.0
+FRAMED_MIN_IN = 2.5       # a print with a white border all round may be this small,
+FRAMED_MAX_MAT = 0.7      # hold this much pale/pink, and have lines across the strips
+FRAME_FROM_IN = 0.03      # its border is looked for this far outside the box...
+FRAME_TO_IN = 0.12        # ...to this far
+FRAME_MIN = 0.6           # and must be this white on every side
+WHITE_SAT = 40
+WHITE_V = 185
+CREAM_HUE = 15            # yellowed borders and album paper: hue 16-18; pink mat: 12-13
 CROSS_TILT = 1.0         # pocket check uses angles within this of the box's own
 TRIM_MAT_FRAC = 0.6       # a chosen photo loses edge rows/columns this full of mat,
 TRIM_MAX_IN = 1.0         # up to this much per side
@@ -273,6 +281,7 @@ LEFTOVER_MIN_SIDE_IN = 1.5  # ...if at least this wide both ways (not a pocket s
 SHINGLE_LINE = 0.8        # two edges this complete across a box...
 SHINGLE_GAP_IN = 0.7      # ...this close together are pocket strips, not one photo
 STACK_SHINGLES = 10       # this many long parallel edges across a blob = a stack
+SINGLE_PRINT_MAX_FRAC = 0.9  # bigger than an 8x10 (82% of the glass): the album page itself
 SINGLE_PRINT_SIDES = 0.6  # a big blob straight-edged this well all round is one print
 
 
@@ -352,6 +361,9 @@ class _Stack:
         self.plain = mat | (flat15 & (sat < 40))   # also flat grey: the scanner lid, the page
         self.score_ii = cv2.integral(np.where(mat, -MAT_PENALTY, 1.0))
         self.mat_ii = cv2.integral(mat.astype(np.float64))
+        # A print's white border, often yellowed to cream; pink mat is redder.
+        white = (val > WHITE_V) & ((sat < WHITE_SAT) | (hue >= CREAM_HUE) & (hue <= 30) & (sat < 120))
+        self.white_ii = cv2.integral(white.astype(np.float64))
         # Running sums along each line, so a side's support is two lookups.
         self.hcs = np.pad(np.cumsum(self.eh, axis=1, dtype=np.int32), ((0, 0), (1, 0)))
         self.vcs = np.pad(np.cumsum(self.ev, axis=0, dtype=np.int32), ((1, 0), (0, 0)))
@@ -402,10 +414,12 @@ class _Stack:
     def _mat_beside(self, a, b):
         return any(self.pink[s].mean() >= 0.25 or self.flat[s].mean() >= 0.8 for s in (a, b))
 
-    def pocket_line_inside(self, l, r, t, b):
+    def pocket_line_inside(self, l, r, t, b, both_ways=True):
         """Does a pocket boundary (a near-complete straight line with mat
         beside it) cross the box? Lines in the photo itself (door frames,
-        shelves) seldom have flat mat along them."""
+        shelves) seldom have flat mat along them. Unless `both_ways`, only
+        lines running the same way as the stack's strips count: a door frame
+        or tree trunk across them is part of a photo."""
         mx, my, m, e = (r - l) * 0.1, (b - t) * 0.1, INNER_MARGIN_IN * self.ppi, self.band
         L, R, T, B = int(l), int(r), int(t), int(b)
         gap = SHINGLE_GAP_IN * self.ppi
@@ -415,13 +429,15 @@ class _Stack:
             near = [x for x in self.xs if l + m < x < r - m and self._vsup(x, t + my, b - my) >= SHINGLE_LINE]
         if any(q - p < gap for p, q in zip(near, near[1:])):
             return True   # pocket strips: edges stacked close like shingles
-        for y in self.ys:
+        h_ok = both_ways or self.axis == "h"
+        v_ok = both_ways or self.axis == "v"
+        for y in (self.ys if h_ok else ()):
             if t + m < y < b - m:
                 s = self._hsup(y, l + mx, r - mx)
                 if s >= CLEAN_LINE or s >= POCKET_LINE and self._mat_beside(
                         (slice(y - e, y - 2), slice(L, R)), (slice(y + 2, y + e), slice(L, R))):
                     return True
-        for x in self.xs:
+        for x in (self.xs if v_ok else ()):
             if l + m < x < r - m:
                 s = self._vsup(x, t + my, b - my)
                 if s >= CLEAN_LINE or s >= POCKET_LINE and self._mat_beside(
@@ -447,7 +463,9 @@ class _Stack:
         edge all round. A pocket stack's outline is ragged on at least one
         side, and it has pocket edges inside, many of them parallel like
         shingles (each crossing at least half the blob)."""
-        if fill >= 0.9 and self._outline_support() >= SINGLE_PRINT_SIDES:
+        l, r, t, b = self.blob
+        whole_page = (r - l) * (b - t) >= SINGLE_PRINT_MAX_FRAC * self.shape[0] * self.shape[1]
+        if fill >= 0.9 and not whole_page and self._outline_support() >= SINGLE_PRINT_SIDES:
             return False
         if self.pocket_line_inside(*self.blob):
             return True
@@ -458,16 +476,27 @@ class _Stack:
         return ii[b, r] - ii[t, r] - ii[b, l] + ii[t, l]
 
     def candidates(self):
-        """(score, box) for every rectangle that could be a fully visible
+        """(score, box, framed) for every rectangle that could be a fully visible
         photo at this angle: four supported sides, at most MAX_MAT_FRAC mat.
         Score: photo pixels minus penalised mat. Whether a pocket boundary
         crosses it is checked later, only for boxes that could win."""
         lo, hi = POCKET_MIN_IN * self.ppi, POCKET_MAX_IN * self.ppi
+        flo = min(lo, FRAMED_MIN_IN * self.ppi)
+        short_max = POCKET_SHORT_MAX_IN * self.ppi
         xs = np.array(self.xs, int)
+        H, W = self.mat.shape
+        o1, o2 = max(int(FRAME_FROM_IN * self.ppi), 1), max(int(FRAME_TO_IN * self.ppi), 3)
+        wi = self.white_ii
+
+        def band(x0, x1, y0, y1):   # white fraction of [y0,y1) x [x0,x1), clipped
+            x0, x1 = np.clip(x0, 0, W), np.clip(x1, 0, W)
+            y0, y1 = np.clip(y0, 0, H), np.clip(y1, 0, H)
+            area = np.maximum((x1 - x0) * (y1 - y0), 1)
+            return (wi[y1, x1] - wi[y0, x1] - wi[y1, x0] + wi[y0, x0]) / area
         out = []
         for i, t in enumerate(self.ys):
             for b in self.ys[i + 1:]:
-                if not lo <= b - t <= hi:
+                if not flo <= b - t <= hi:
                     continue
                 m = (b - t) * 0.1
                 ya, yb = int(t + m), int(b - m)
@@ -475,8 +504,7 @@ class _Stack:
                 if len(sides) < 2:
                     continue
                 L, R = np.meshgrid(sides, sides, indexing="ij")
-                ok = (R - L >= lo) & (R - L <= hi) & \
-                    (np.minimum(R - L, b - t) <= POCKET_SHORT_MAX_IN * self.ppi)
+                ok = (R - L >= flo) & (R - L <= hi) & (np.minimum(R - L, b - t) <= short_max)
                 L, R = L[ok], R[ok]
                 mx = (R - L) * 0.1
                 xa, xb = (L + mx).astype(int), (R - mx).astype(int)
@@ -484,13 +512,25 @@ class _Stack:
                 ok = (self.hcs[t, xb] - self.hcs[t, xa] >= need) & \
                     (self.hcs[b, xb] - self.hcs[b, xa] >= need)
                 L, R = L[ok], R[ok]
+                # A print with a white border all round (stuck on an album
+                # page) may be smaller and may hold pale or pink areas; a
+                # photo in a pocket has no such frame and keeps the strict rules.
+                framed = np.minimum.reduce([
+                    band(L, R, np.full_like(L, t - o2), np.full_like(L, t - o1)),
+                    band(L, R, np.full_like(L, b + o1), np.full_like(L, b + o2)),
+                    band(L - o2, L - o1, np.full_like(L, t), np.full_like(L, b)),
+                    band(R + o1, R + o2, np.full_like(L, t), np.full_like(L, b))]) >= FRAME_MIN \
+                    if len(L) else np.zeros(0, bool)
+                sized = (R - L >= lo) & (b - t >= lo)
                 ii = self.mat_ii
                 mat = ii[b, R] - ii[t, R] - ii[b, L] + ii[t, L]
-                ok = mat <= MAX_MAT_FRAC * (R - L) * (b - t)
-                L, R = L[ok], R[ok]
+                area = (R - L) * (b - t)
+                ok = (sized & (mat <= MAX_MAT_FRAC * area)) | (framed & (mat <= FRAMED_MAX_MAT * area))
+                L, R, framed = L[ok], R[ok], framed[ok]
                 sc = self.score_ii
                 score = sc[b, R] - sc[t, R] - sc[b, L] + sc[t, L]
-                out += [(float(v), (int(l), int(r), t, b)) for v, l, r in zip(score, L, R)]
+                out += [(float(v), (int(l), int(r), t, b), bool(f))
+                        for v, l, r, f in zip(score, L, R, framed)]
         return out
 
     def to_page(self, box):
@@ -516,12 +556,12 @@ class _Stack:
             return int(ok[-1]) + 1 if len(ok) else 0
         return l + run(cols), r - run(cols[::-1]), t + run(rows), b - run(rows[::-1])
 
-    def pocket_line_across(self, rect):
+    def pocket_line_across(self, rect, both_ways=True):
         """pocket_line_inside() for a rotated rect found at another angle."""
         c = self.M @ np.array([rect[0][0], rect[0][1], 1.0])
         (w, h), d = rect[1], 0.1 * self.ppi   # a little inside, for the tilt
         return self.pocket_line_inside(c[0] - w / 2 + d, c[0] + w / 2 - d,
-                                       c[1] - h / 2 + d, c[1] + h / 2 - d)
+                                       c[1] - h / 2 + d, c[1] + h / 2 - d, both_ways)
 
     def _solid(self, c):
         """Has the region a solid core (a photo), not just a frame or strips?"""
@@ -574,16 +614,16 @@ def _pocket_photos(small, contour, ppi):
                      np.r_[base.angle, a0 + np.arange(-POCKET_TILT, POCKET_TILT + 1e-6, 0.5)]}):
         st = _Stack(small, contour, ppi, a, base.axis)
         stacks.append(st)
-        cands += [(score, st, box) for score, box in st.candidates()]
+        cands += [(score, st, box, framed) for score, box, framed in st.candidates()]
     rects = []
-    for _, st, box in sorted(cands, key=lambda c: -c[0]):
+    for _, st, box, framed in sorted(cands, key=lambda c: -c[0]):
         rect = st.to_page(box)
         area = rect[1][0] * rect[1][1]
         if any(_shared(rect, other) > 0.03 * area for other in rects):
             continue
         # A pocket edge tilted against this box's angle can look too broken
         # to count; seen at its own angle it is straight.
-        if any(o.pocket_line_across(rect) for o in stacks
+        if any(o.pocket_line_across(rect, not framed) for o in stacks
                if abs(o.angle - rect[2]) <= CROSS_TILT + 1e-6):
             continue
         rects.append(rect)
