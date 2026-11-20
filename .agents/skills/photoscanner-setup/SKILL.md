@@ -77,6 +77,8 @@ To test detection changes, run on a copy and look at the crops. Don't test on th
 python3 split_photos.py /path/to/copy --keep --debug -o /tmp/out
 ```
 
+**Regression tests: run `python3 tests/check_crops.py` before committing any change to `split_photos.py`** (about 30 s; exit 1 on failure). It runs the 26 scans in `tests/reference/` and checks them against `tests/expected.json`: (1) marked photos (`truth`: four corners in full-resolution page pixels, graded good at IoU ≥ 0.80, bad at 0.20–0.80, otherwise left for a report) must not get worse than their recorded `grade`; (2) every page's crops (IoU ≥ 0.95), problem-report kinds, cut-off flags and upright turns must match exactly (`golden`). After an intended change, inspect with `--show DIR`, then `--update` (optionally only for named scans). Baseline at commit time: 21 good, 8 left for a report, 2 bad (scan-82's half-off chair print, scan-78's top photo at 0.79). When the user reports a bad page, add it to the set (copy from `~/scans/done/`, add an entry with `album`/`note`, mark its photos from a gridded preview), tune against the whole set, never just the new page. The reference scans are the user's family photos, committed to the public repo with their permission.
+
 ## 3. Watcher (macOS LaunchAgent)
 
 `--watch` checks the folder every 5 s. It only splits a file whose size and modification time are the same on two checks in a row, because the printer writes over the network and a half-written PDF fails. A broken file is reported once and retried only if it changes.

@@ -1,0 +1,1976 @@
+{
+ "scan-2": {
+  "album": "normal sleeve, 300 dpi",
+  "note": "early low-res scan; one photo recovered from a merged outline",
+  "crops": [
+   {
+    "quad": [
+     [
+      2003,
+      1144
+     ],
+     [
+      987,
+      1112
+     ],
+     [
+      1020,
+      63
+     ],
+     [
+      2036,
+      95
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      1988,
+      2282
+     ],
+     [
+      971,
+      2282
+     ],
+     [
+      971,
+      1228
+     ],
+     [
+      1988,
+      1228
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      2165,
+      3517
+     ],
+     [
+      611,
+      3502
+     ],
+     [
+      622,
+      2367
+     ],
+     [
+      2176,
+      2382
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-8": {
+  "album": "normal sleeve, 300 dpi",
+  "note": "an irregular shape reported, not cropped",
+  "crops": [
+   {
+    "quad": [
+     [
+      1486,
+      2307
+     ],
+     [
+      502,
+      2278
+     ],
+     [
+      528,
+      1407
+     ],
+     [
+      1512,
+      1437
+     ]
+    ],
+    "turn": 90,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      1703,
+      3537
+     ],
+     [
+      366,
+      3503
+     ],
+     [
+      393,
+      2453
+     ],
+     [
+      1729,
+      2486
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "irregular"
+  ]
+ },
+ "scan-21": {
+  "album": "normal sleeve, 300 dpi",
+  "note": "a photo cut off by the scanner edge",
+  "crops": [
+   {
+    "quad": [
+     [
+      421,
+      1102
+     ],
+     [
+      409,
+      335
+     ],
+     [
+      2174,
+      307
+     ],
+     [
+      2186,
+      1074
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      450,
+      2874
+     ],
+     [
+      382,
+      1676
+     ],
+     [
+      2144,
+      1575
+     ],
+     [
+      2212,
+      2774
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      2181,
+      3530
+     ],
+     [
+      424,
+      3503
+     ],
+     [
+      433,
+      2948
+     ],
+     [
+      2190,
+      2975
+     ]
+    ],
+    "turn": 0,
+    "cut_off": true
+   }
+  ],
+  "missed": []
+ },
+ "scan-30": {
+  "album": "normal sleeve",
+  "note": "two photos recovered (merged with sleeve edge / pale edges)",
+  "crops": [
+   {
+    "quad": [
+     [
+      763,
+      3476
+     ],
+     [
+      821,
+      1733
+     ],
+     [
+      4397,
+      1852
+     ],
+     [
+      4339,
+      3595
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      754,
+      6864
+     ],
+     [
+      658,
+      4465
+     ],
+     [
+      4214,
+      4324
+     ],
+     [
+      4309,
+      6723
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-36": {
+  "album": "normal sleeve",
+  "note": "three photos, one cut off by the scanner edge",
+  "crops": [
+   {
+    "quad": [
+     [
+      783,
+      2590
+     ],
+     [
+      702,
+      185
+     ],
+     [
+      4229,
+      66
+     ],
+     [
+      4311,
+      2471
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      838,
+      5136
+     ],
+     [
+      776,
+      2731
+     ],
+     [
+      4277,
+      2642
+     ],
+     [
+      4339,
+      5047
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      4182,
+      7193
+     ],
+     [
+      1567,
+      7010
+     ],
+     [
+      1684,
+      5342
+     ],
+     [
+      4300,
+      5526
+     ]
+    ],
+    "turn": 0,
+    "cut_off": true
+   }
+  ],
+  "missed": []
+ },
+ "scan-39": {
+  "album": "normal sleeve",
+  "note": "one photo plus an irregular shape reported",
+  "crops": [
+   {
+    "quad": [
+     [
+      4136,
+      2970
+     ],
+     [
+      676,
+      2920
+     ],
+     [
+      711,
+      515
+     ],
+     [
+      4170,
+      565
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "irregular"
+  ]
+ },
+ "scan-46": {
+  "album": "normal sleeve",
+  "note": "recovered photo and a cut-off one on the same page",
+  "crops": [
+   {
+    "quad": [
+     [
+      824,
+      2742
+     ],
+     [
+      774,
+      338
+     ],
+     [
+      4300,
+      265
+     ],
+     [
+      4350,
+      2669
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      754,
+      5353
+     ],
+     [
+      824,
+      2959
+     ],
+     [
+      4360,
+      3063
+     ],
+     [
+      4289,
+      5457
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      4287,
+      7089
+     ],
+     [
+      765,
+      7010
+     ],
+     [
+      797,
+      5574
+     ],
+     [
+      4319,
+      5653
+     ]
+    ],
+    "turn": 0,
+    "cut_off": true
+   }
+  ],
+  "missed": []
+ },
+ "scan-59": {
+  "album": "normal sleeve",
+  "note": "photos lying mostly off the glass (off-scanner reports)",
+  "crops": [
+   {
+    "quad": [
+     [
+      4190,
+      3324
+     ],
+     [
+      1266,
+      3210
+     ],
+     [
+      1348,
+      1088
+     ],
+     [
+      4272,
+      1202
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "off-scanner",
+   "off-scanner"
+  ]
+ },
+ "scan-60": {
+  "album": "normal sleeve",
+  "note": "a single photo",
+  "crops": [
+   {
+    "quad": [
+     [
+      1391,
+      5335
+     ],
+     [
+      1158,
+      1268
+     ],
+     [
+      3993,
+      1105
+     ],
+     [
+      4226,
+      5173
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-68": {
+  "album": "normal sleeve",
+  "note": "recovered photo",
+  "crops": [
+   {
+    "quad": [
+     [
+      3914,
+      3317
+     ],
+     [
+      1274,
+      3175
+     ],
+     [
+      1387,
+      1069
+     ],
+     [
+      4026,
+      1210
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      3884,
+      6129
+     ],
+     [
+      1211,
+      6037
+     ],
+     [
+      1284,
+      3923
+     ],
+     [
+      3956,
+      4015
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-72": {
+  "album": "normal sleeve",
+  "note": "two ordinary photos",
+  "crops": [
+   {
+    "quad": [
+     [
+      4397,
+      3351
+     ],
+     [
+      833,
+      3303
+     ],
+     [
+      863,
+      1043
+     ],
+     [
+      4428,
+      1091
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      4269,
+      6175
+     ],
+     [
+      1271,
+      6131
+     ],
+     [
+      1302,
+      4023
+     ],
+     [
+      4300,
+      4068
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-62": {
+  "album": "flip album, pink pockets",
+  "note": "bottom photo hangs off the glass: report",
+  "truth": [
+   {
+    "label": "photo 1",
+    "quad": [
+     [
+      1640,
+      2865
+     ],
+     [
+      4260,
+      2850
+     ],
+     [
+      4290,
+      4940
+     ],
+     [
+      1670,
+      5000
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      1582,
+      5013
+     ],
+     [
+      1566,
+      2756
+     ],
+     [
+      4286,
+      2737
+     ],
+     [
+      4301,
+      4994
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "partly-off"
+  ]
+ },
+ "scan-63": {
+  "album": "flip album, pink pockets",
+  "note": "two photos over a deep pocket stack",
+  "truth": [
+   {
+    "label": "top (dinner, man in sunglasses)",
+    "quad": [
+     [
+      950,
+      1690
+     ],
+     [
+      3610,
+      1750
+     ],
+     [
+      3560,
+      3825
+     ],
+     [
+      890,
+      3760
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "bottom (candles)",
+    "quad": [
+     [
+      940,
+      4040
+     ],
+     [
+      3590,
+      4125
+     ],
+     [
+      3560,
+      6210
+     ],
+     [
+      910,
+      6160
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      908,
+      3880
+     ],
+     [
+      962,
+      1674
+     ],
+     [
+      3602,
+      1738
+     ],
+     [
+      3548,
+      3945
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      896,
+      6184
+     ],
+     [
+      930,
+      4014
+     ],
+     [
+      3616,
+      4056
+     ],
+     [
+      3582,
+      6226
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-64": {
+  "album": "flip album, pink pockets",
+  "note": "photo with pocket strips above",
+  "truth": [
+   {
+    "label": "photo 1",
+    "quad": [
+     [
+      1350,
+      2140
+     ],
+     [
+      4040,
+      2245
+     ],
+     [
+      3950,
+      4520
+     ],
+     [
+      1260,
+      4410
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      153,
+      7010
+     ],
+     [
+      0,
+      7010
+     ],
+     [
+      0,
+      0
+     ],
+     [
+      153,
+      0
+     ]
+    ],
+    "turn": 0,
+    "cut_off": true
+   },
+   {
+    "quad": [
+     [
+      1204,
+      4370
+     ],
+     [
+      1369,
+      2173
+     ],
+     [
+      4073,
+      2376
+     ],
+     [
+      3908,
+      4573
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-65": {
+  "album": "flip album, pink pockets",
+  "note": "tree trunk inside the top photo; fridge photo is reported",
+  "truth": [
+   {
+    "label": "top (woods)",
+    "quad": [
+     [
+      1725,
+      1415
+     ],
+     [
+      4410,
+      1490
+     ],
+     [
+      4350,
+      3525
+     ],
+     [
+      1690,
+      3475
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "bottom (boy with cat by fridge)",
+    "quad": [
+     [
+      1510,
+      3760
+     ],
+     [
+      4160,
+      3850
+     ],
+     [
+      4140,
+      5940
+     ],
+     [
+      1450,
+      5840
+     ]
+    ],
+    "grade": "report"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      1626,
+      3592
+     ],
+     [
+      1690,
+      1286
+     ],
+     [
+      4417,
+      1363
+     ],
+     [
+      4353,
+      3668
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "unsure"
+  ]
+ },
+ "scan-66": {
+  "album": "flip album, pink pockets",
+  "note": "square print beside pink mat; horizon in the beach photo",
+  "truth": [
+   {
+    "label": "top (square print)",
+    "quad": [
+     [
+      1990,
+      1050
+     ],
+     [
+      4015,
+      1040
+     ],
+     [
+      4015,
+      3140
+     ],
+     [
+      2000,
+      3140
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "bottom (beach)",
+    "quad": [
+     [
+      1440,
+      3430
+     ],
+     [
+      4100,
+      3440
+     ],
+     [
+      4090,
+      5500
+     ],
+     [
+      1450,
+      5500
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      1967,
+      3117
+     ],
+     [
+      1986,
+      943
+     ],
+     [
+      4123,
+      961
+     ],
+     [
+      4104,
+      3135
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      112,
+      7010
+     ],
+     [
+      0,
+      7010
+     ],
+     [
+      0,
+      0
+     ],
+     [
+      112,
+      0
+     ]
+    ],
+    "turn": 0,
+    "cut_off": true
+   },
+   {
+    "quad": [
+     [
+      1442,
+      5569
+     ],
+     [
+      1385,
+      3396
+     ],
+     [
+      4208,
+      3322
+     ],
+     [
+      4264,
+      5495
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-67": {
+  "album": "white embossed binder sleeve",
+  "note": "one photo; the sleeve texture must not make lines everywhere",
+  "truth": [
+   {
+    "label": "photo 1",
+    "quad": [
+     [
+      1390,
+      4765
+     ],
+     [
+      4010,
+      4765
+     ],
+     [
+      4000,
+      6860
+     ],
+     [
+      1400,
+      6860
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      1079,
+      6907
+     ],
+     [
+      1079,
+      4621
+     ],
+     [
+      4026,
+      4621
+     ],
+     [
+      4026,
+      6907
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-76": {
+  "album": "flip album, pink pockets",
+  "note": "photo over many strips",
+  "truth": [
+   {
+    "label": "photo 1",
+    "quad": [
+     [
+      1330,
+      1610
+     ],
+     [
+      4395,
+      1665
+     ],
+     [
+      4355,
+      3975
+     ],
+     [
+      1290,
+      3920
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      1283,
+      3916
+     ],
+     [
+      1343,
+      1602
+     ],
+     [
+      4397,
+      1682
+     ],
+     [
+      4336,
+      3996
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-77": {
+  "album": "flip album, pink pockets",
+  "note": "album 2.5 degrees crooked on the glass",
+  "truth": [
+   {
+    "label": "photo 1",
+    "quad": [
+     [
+      1185,
+      2090
+     ],
+     [
+      4290,
+      2195
+     ],
+     [
+      4210,
+      4500
+     ],
+     [
+      1105,
+      4395
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      1085,
+      4372
+     ],
+     [
+      1209,
+      2002
+     ],
+     [
+      4297,
+      2164
+     ],
+     [
+      4173,
+      4533
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-78": {
+  "album": "flip album, pink pockets",
+  "note": "two photos",
+  "truth": [
+   {
+    "label": "photo 1",
+    "quad": [
+     [
+      1110,
+      1235
+     ],
+     [
+      4060,
+      1310
+     ],
+     [
+      4030,
+      3375
+     ],
+     [
+      1070,
+      3325
+     ]
+    ],
+    "grade": "bad"
+   },
+   {
+    "label": "photo 2",
+    "quad": [
+     [
+      1040,
+      3640
+     ],
+     [
+      4000,
+      3690
+     ],
+     [
+      3965,
+      5760
+     ],
+     [
+      1015,
+      5740
+     ]
+    ],
+    "grade": "report"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      1090,
+      3422
+     ],
+     [
+      1075,
+      1604
+     ],
+     [
+      4170,
+      1576
+     ],
+     [
+      4186,
+      3395
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "unsure"
+  ]
+ },
+ "scan-79": {
+  "album": "flip album, pink pockets",
+  "note": "two photos",
+  "truth": [
+   {
+    "label": "photo 1",
+    "quad": [
+     [
+      1465,
+      1250
+     ],
+     [
+      4440,
+      1310
+     ],
+     [
+      4390,
+      3415
+     ],
+     [
+      1440,
+      3340
+     ]
+    ],
+    "grade": "report"
+   },
+   {
+    "label": "photo 2",
+    "quad": [
+     [
+      1360,
+      3690
+     ],
+     [
+      4310,
+      3760
+     ],
+     [
+      4290,
+      5810
+     ],
+     [
+      1310,
+      5750
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      1264,
+      5780
+     ],
+     [
+      1371,
+      3587
+     ],
+     [
+      4414,
+      3736
+     ],
+     [
+      4306,
+      5928
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "unsure"
+  ]
+ },
+ "scan-80": {
+  "album": "flip album, pink pockets",
+  "note": "sideways photo on top, dark room below",
+  "truth": [
+   {
+    "label": "photo 1",
+    "quad": [
+     [
+      1260,
+      1240
+     ],
+     [
+      4180,
+      1250
+     ],
+     [
+      4180,
+      3275
+     ],
+     [
+      1260,
+      3325
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "photo 2",
+    "quad": [
+     [
+      1250,
+      3575
+     ],
+     [
+      4180,
+      3575
+     ],
+     [
+      4180,
+      5675
+     ],
+     [
+      1250,
+      5700
+     ]
+    ],
+    "grade": "report"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      1223,
+      3422
+     ],
+     [
+      1223,
+      1203
+     ],
+     [
+      4319,
+      1203
+     ],
+     [
+      4319,
+      3422
+     ]
+    ],
+    "turn": 270,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "unsure"
+  ]
+ },
+ "scan-81": {
+  "album": "flip album, pink pockets",
+  "note": "two photos",
+  "truth": [
+   {
+    "label": "photo 1",
+    "quad": [
+     [
+      1340,
+      1090
+     ],
+     [
+      4290,
+      1090
+     ],
+     [
+      4290,
+      3160
+     ],
+     [
+      1360,
+      3200
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "photo 2",
+    "quad": [
+     [
+      1325,
+      3440
+     ],
+     [
+      4250,
+      3440
+     ],
+     [
+      4250,
+      5540
+     ],
+     [
+      1310,
+      5540
+     ]
+    ],
+    "grade": "report"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      1353,
+      3095
+     ],
+     [
+      1316,
+      1020
+     ],
+     [
+      4279,
+      968
+     ],
+     [
+      4316,
+      3043
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
+ },
+ "scan-82": {
+  "album": "prints on ribbed orange paper",
+  "note": "white-bordered square prints; page fills the whole scan",
+  "truth": [
+   {
+    "label": "crib",
+    "quad": [
+     [
+      2950,
+      515
+     ],
+     [
+      4825,
+      515
+     ],
+     [
+      4825,
+      2390
+     ],
+     [
+      2960,
+      2390
+     ]
+    ],
+    "grade": "report"
+   },
+   {
+    "label": "crawling baby",
+    "quad": [
+     [
+      3050,
+      2775
+     ],
+     [
+      4915,
+      2775
+     ],
+     [
+      4915,
+      4640
+     ],
+     [
+      3060,
+      4650
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "Santa",
+    "quad": [
+     [
+      735,
+      4860
+     ],
+     [
+      2615,
+      4860
+     ],
+     [
+      2615,
+      6735
+     ],
+     [
+      750,
+      6735
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "boy at table",
+    "quad": [
+     [
+      3025,
+      4965
+     ],
+     [
+      4890,
+      4975
+     ],
+     [
+      4890,
+      6835
+     ],
+     [
+      3025,
+      6825
+     ]
+    ],
+    "grade": "bad"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      3020,
+      4643
+     ],
+     [
+      3055,
+      2651
+     ],
+     [
+      4948,
+      2684
+     ],
+     [
+      4913,
+      4676
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      696,
+      6700
+     ],
+     [
+      745,
+      4816
+     ],
+     [
+      2654,
+      4866
+     ],
+     [
+      2605,
+      6750
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      3005,
+      6974
+     ],
+     [
+      3022,
+      4961
+     ],
+     [
+      4427,
+      4973
+     ],
+     [
+      4410,
+      6986
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "partly-off"
+  ]
+ },
+ "scan-83": {
+  "album": "prints on ribbed orange paper",
+  "note": "six white-bordered prints",
+  "truth": [
+   {
+    "label": "kitchen",
+    "quad": [
+     [
+      275,
+      310
+     ],
+     [
+      2140,
+      290
+     ],
+     [
+      2140,
+      2185
+     ],
+     [
+      285,
+      2200
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "eating",
+    "quad": [
+     [
+      2375,
+      310
+     ],
+     [
+      4550,
+      310
+     ],
+     [
+      4550,
+      2490
+     ],
+     [
+      2385,
+      2490
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "birdbath",
+    "quad": [
+     [
+      215,
+      2810
+     ],
+     [
+      2385,
+      2810
+     ],
+     [
+      2385,
+      4810
+     ],
+     [
+      215,
+      4825
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "sofa",
+    "quad": [
+     [
+      2835,
+      2785
+     ],
+     [
+      4700,
+      2775
+     ],
+     [
+      4700,
+      4690
+     ],
+     [
+      2850,
+      4690
+     ]
+    ],
+    "grade": "good"
+   },
+   {
+    "label": "leaves",
+    "quad": [
+     [
+      350,
+      4925
+     ],
+     [
+      2250,
+      4925
+     ],
+     [
+      2260,
+      6810
+     ],
+     [
+      365,
+      6810
+     ]
+    ],
+    "grade": "report"
+   },
+   {
+    "label": "dog",
+    "quad": [
+     [
+      2915,
+      4960
+     ],
+     [
+      4730,
+      4925
+     ],
+     [
+      4750,
+      6810
+     ],
+     [
+      3000,
+      6850
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      291,
+      2201
+     ],
+     [
+      248,
+      321
+     ],
+     [
+      2120,
+      277
+     ],
+     [
+      2163,
+      2157
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      2283,
+      2510
+     ],
+     [
+      2232,
+      332
+     ],
+     [
+      4530,
+      279
+     ],
+     [
+      4581,
+      2457
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      247,
+      4868
+     ],
+     [
+      166,
+      2865
+     ],
+     [
+      2359,
+      2775
+     ],
+     [
+      2440,
+      4778
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      2852,
+      4683
+     ],
+     [
+      2825,
+      2798
+     ],
+     [
+      4701,
+      2771
+     ],
+     [
+      4729,
+      4655
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   },
+   {
+    "quad": [
+     [
+      2974,
+      6935
+     ],
+     [
+      2910,
+      4940
+     ],
+     [
+      4777,
+      4880
+     ],
+     [
+      4841,
+      6876
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "unsure"
+  ]
+ },
+ "scan-84": {
+  "album": "prints on ribbed orange paper",
+  "note": "Santa photo; three prints run off the right edge",
+  "truth": [
+   {
+    "label": "crib",
+    "quad": [
+     [
+      3040,
+      460
+     ],
+     [
+      4925,
+      460
+     ],
+     [
+      4925,
+      2350
+     ],
+     [
+      3060,
+      2350
+     ]
+    ],
+    "grade": "report"
+   },
+   {
+    "label": "Santa",
+    "quad": [
+     [
+      865,
+      4825
+     ],
+     [
+      2750,
+      4815
+     ],
+     [
+      2765,
+      6685
+     ],
+     [
+      880,
+      6700
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      860,
+      6700
+     ],
+     [
+      881,
+      4695
+     ],
+     [
+      2774,
+      4715
+     ],
+     [
+      2753,
+      6720
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "partly-off",
+   "partly-off"
+  ]
+ }
+}

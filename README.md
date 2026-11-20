@@ -185,6 +185,16 @@ An album's plastic sleeve is almost colourless, while photos, even pale ones lik
 
 The script finds the photos fresh on every page instead of cutting at fixed positions, so it doesn't matter if the photos sit differently from page to page.
 
+## Tests
+
+`tests/reference/` holds 26 real album pages: normal sleeves (including early 300 dpi scans), a flip album with pink pockets, a white binder sleeve, and white-bordered prints on ribbed orange paper. `tests/expected.json` records how each must come out. On 15 of the pages someone marked where every photo really is (31 photos), and each must stay at least as good as recorded: cropped correctly, left for a problem report, or (two known cases) cropped badly. Every page's crops, problem reports and upright turns must also stay exactly the same.
+
+```bash
+python3 tests/check_crops.py
+```
+
+It takes about 30 seconds and says FAILED, with what changed, if any page comes out differently. After an intended change, look at the pages with `--show /tmp/check` (crops in green, marked photos in blue), then accept them with `--update`. When a new kind of album turns up, add one of its scans to `tests/reference/`, give it an entry in `expected.json` (mark its photos if you can), and run `--update` with its name.
+
 ## Limitations
 
 - Several small photos overlapping in one slot (for example school wallet photos) may come out as one image, or be skipped with a `_PROBLEM.txt` report.
