@@ -245,16 +245,33 @@ def _recover(hsv, gray, c, page_area):
 # visible photo is a rectangle bounded by four long straight edges, with
 # photo content inside and flat mat, sleeve or cover around it.
 STACK_MIN_FRAC = 0.40     # a "photo" bigger than this may be a pocket stack
-POCKET_MIN_IN = 2.5       # side lengths (inches) of the photos searched for
-POCKET_MAX_IN = 8.5
+LINE_MIN_IN = 1.25        # straight runs at least this long are candidate edges
+POCKET_MIN_IN = 3.2       # side lengths (inches) of the photos searched for:
+POCKET_MAX_IN = 6.3       # snapshot prints (3.5x3.5 to 4x6); a box outside this
+POCKET_SHORT_MAX_IN = 4.3 # is a photo cut short or grown over its neighbours
+MAT_BLUR = 9              # blur (px) before judging flatness (sleeve emboss)
+LINE_BLUR = 7             # blur (px) before looking for straight edges
 LINE_TOL = 3              # px a border may wander off straight (~0.7° tilt)
+SKEW_MAX = 3.0            # the stack is straightened first, by up to this many degrees,
+INNER_MARGIN_IN = 0.15    # lines this close inside a side are its own double edge
+COVER_V = 0.0             # dark, grey, finely textured: the album cover
+COVER_SD = 12.0
+CROSS_TILT = 1.0         # pocket check uses angles within this of the box's own
+TRIM_MAT_FRAC = 0.6       # a chosen photo loses edge rows/columns this full of mat,
+TRIM_MAX_IN = 1.0         # up to this much per side
+POCKET_TILT = 2.0         # then searched at +-this (0.5 degree steps): photos sit askew
 SIDE_SUPPORT = 0.7        # fraction of a side that must lie on an edge
 POCKET_LINE = 0.85        # an inner line this complete, with mat beside it,
 CLEAN_LINE = 0.95         # (or this complete on its own) is a pocket boundary
 MAT_PENALTY = 3.0         # score: photo pixel +1, mat pixel -MAT_PENALTY
 MAX_MAT_FRAC = 0.25       # a pocket photo may contain at most this much "mat"
 LEFTOVER_MIN_IN2 = 1.5    # photo content left over at the scan's edge is reported...
+UNSURE_MIN_SIDE_IN = 2.6  # a whole photo's worth left uncropped (away from the edge)...
+UNSURE_CORE_IN = 1.4      # ...and solid this far across (not a sleeve's frame)
+UNSURE_MIN_FILL = 0.3     # ...filling its box this well is reported, not dropped
 LEFTOVER_MIN_SIDE_IN = 1.5  # ...if at least this wide both ways (not a pocket strip)
+SHINGLE_LINE = 0.8        # two edges this complete across a box...
+SHINGLE_GAP_IN = 0.7      # ...this close together are pocket strips, not one photo
 STACK_SHINGLES = 10       # this many long parallel edges across a blob = a stack
 SINGLE_PRINT_SIDES = 0.6  # a big blob straight-edged this well all round is one print
 
@@ -267,11 +284,12 @@ def _longest_run(b):
 
 def _line_positions(edge, lo, hi, a0, a1, minlen):
     """Rows in [lo, hi) of `edge` with a straight run at least `minlen` long
-    within columns [a0, a1); neighbouring rows merge to their strongest one."""
+    within columns [a0, a1); neighbouring rows merge to their strongest one
+    (a few at most, so a textured sleeve doesn't swallow a photo's edge)."""
     out, grp = [], []
     for p in list(range(lo, hi)) + [None]:
         n = _longest_run(edge[p, a0:a1] > 0) if p is not None else 0
-        if n >= minlen and (not grp or p - grp[-1][0] <= 3):
+        if n >= minlen and (not grp or p - grp[-1][0] <= 3 and p - grp[0][0] <= 2 * LINE_TOL + 2):
             grp.append((p, n))
             continue
         if grp:
@@ -284,27 +302,43 @@ class _Stack:
     """A big blob straightened by its angle, with the maps the pocket finder
     uses. Boxes are (left, right, top, bottom) in the straightened frame."""
 
-    def __init__(self, small, contour, ppi):
+    def __init__(self, small, contour, ppi, angle=None, axis=None):
         self.shape, self.ppi = small.shape, ppi
-        (cx, cy), (w, h), self.angle = _upright(cv2.minAreaRect(contour))
-        self.M = cv2.getRotationMatrix2D((cx, cy), self.angle, 1.0)
+        (cx, cy), _, self.angle = _upright(cv2.minAreaRect(contour))
+        if angle is not None:
+            self.angle = angle
+        self.centre = (cx, cy)
         W, H = small.shape[1], small.shape[0]
-        col = cv2.warpAffine(small, self.M, (W, H), borderValue=(255, 255, 255))
         region = np.zeros((H, W), np.uint8)
         cv2.drawContours(region, [contour], 0, 255, -1)
+        self.M = cv2.getRotationMatrix2D((cx, cy), self.angle, 1.0)
+        col = cv2.warpAffine(small, self.M, (W, H), borderValue=(255, 255, 255))
         self.region = cv2.warpAffine(region, self.M, (W, H), flags=cv2.INTER_NEAREST) > 0
-        g = cv2.GaussianBlur(cv2.cvtColor(col, cv2.COLOR_BGR2GRAY), (3, 3), 0).astype(np.float32)
-        eh = (np.abs(cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)) / 4 > EDGE_T).astype(np.uint8)
-        ev = (np.abs(cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)) / 4 > EDGE_T).astype(np.uint8)
+        gray = cv2.cvtColor(col, cv2.COLOR_BGR2GRAY)
+        g = cv2.GaussianBlur(gray, (3, 3), 0).astype(np.float32)
+        # Edges from a softer copy: embossed sleeve texture would otherwise
+        # put a "line" in every row and column.
+        k = int(LINE_BLUR) | 1
+        ge = cv2.GaussianBlur(gray, (k, k), 0).astype(np.float32)
+        eh = (np.abs(cv2.Sobel(ge, cv2.CV_32F, 0, 1, ksize=3)) / 4 > EDGE_T).astype(np.uint8)
+        ev = (np.abs(cv2.Sobel(ge, cv2.CV_32F, 1, 0, ksize=3)) / 4 > EDGE_T).astype(np.uint8)
+        # Turning the scan leaves white corners; their edge is not a photo's.
+        scan = cv2.warpAffine(np.ones((H, W), np.uint8), self.M, (W, H), flags=cv2.INTER_NEAREST)
+        scan = cv2.erode(scan, np.ones((9, 9), np.uint8), borderType=cv2.BORDER_CONSTANT, borderValue=0)
+        eh &= scan
+        ev &= scan
         eh = cv2.morphologyEx(eh, cv2.MORPH_CLOSE, np.ones((1, 9), np.uint8))
         ev = cv2.morphologyEx(ev, cv2.MORPH_CLOSE, np.ones((9, 1), np.uint8))
         k = 2 * LINE_TOL + 1
         self.eh = cv2.dilate(eh, np.ones((k, 1), np.uint8))
         self.ev = cv2.dilate(ev, np.ones((1, k), np.uint8))
 
+        km = int(MAT_BLUR) | 1
+        gm = cv2.GaussianBlur(gray, (km, km), 0).astype(np.float32)
+
         def local_sd(n):
-            mu = cv2.blur(g, (n, n))
-            return np.sqrt(np.maximum(cv2.blur(g * g, (n, n)) - mu * mu, 0))
+            mu = cv2.blur(gm, (n, n))
+            return np.sqrt(np.maximum(cv2.blur(gm * gm, (n, n)) - mu * mu, 0))
         hsv = cv2.cvtColor(cv2.medianBlur(col, 5), cv2.COLOR_BGR2HSV)
         hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
         self.flat = local_sd(7) < 3.5
@@ -313,24 +347,57 @@ class _Stack:
         # or glare, flat dark cover.
         flat15 = local_sd(15) < 4
         mat = flat15 & (self.pink | ((sat < 40) & (val > 200)) | (val < 60))
+        mat |= (val < COVER_V) & (sat < 60) & (local_sd(15) < COVER_SD)
         self.mat = mat
         self.plain = mat | (flat15 & (sat < 40))   # also flat grey: the scanner lid, the page
         self.score_ii = cv2.integral(np.where(mat, -MAT_PENALTY, 1.0))
         self.mat_ii = cv2.integral(mat.astype(np.float64))
+        # Running sums along each line, so a side's support is two lookups.
+        self.hcs = np.pad(np.cumsum(self.eh, axis=1, dtype=np.int32), ((0, 0), (1, 0)))
+        self.vcs = np.pad(np.cumsum(self.ev, axis=0, dtype=np.int32), ((1, 0), (0, 0)))
 
-        self.blob = (max(cx - w / 2, 0), min(cx + w / 2, W - 1),
-                     max(cy - h / 2, 0), min(cy + h / 2, H - 1))
+        rows, cols = np.nonzero(self.region)
+        self.blob = (float(cols.min()), float(cols.max()), float(rows.min()), float(rows.max()))
         x0, x1, y0, y1 = (int(v) for v in self.blob)
-        minlen = 0.5 * POCKET_MIN_IN * ppi
+        minlen = LINE_MIN_IN * ppi
         self.ys = _line_positions(eh, y0, y1 + 1, x0, x1 + 1, minlen)
         self.xs = _line_positions(ev.T, x0, x1 + 1, y0, y1 + 1, minlen)
         self.band = max(int(0.12 * ppi), 3)
+        l, r, t, b = self.blob
+        mx, my = (r - l) * 0.1, (b - t) * 0.1
+        self.hshingles = sum(self._hsup(y, l + mx, r - mx) >= 0.5 for y in self.ys)
+        self.vshingles = sum(self._vsup(x, t + my, b - my) >= 0.5 for x in self.xs)
+        self.axis = axis or ("h" if self.hshingles >= self.vshingles else "v")
+
+    @staticmethod
+    def skew(small, contour, centre, angle):
+        """Extra turn (degrees) that makes the stack's pocket edges straight.
+        A blob filling the whole scan gives minAreaRect no angle to go on,
+        and a border tilted more than LINE_TOL over its length breaks up
+        into short runs that the line search misses."""
+        g = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (3, 3), 0).astype(np.float32)
+        inside = np.zeros(small.shape[:2], np.uint8)
+        cv2.drawContours(inside, [contour], 0, 1, -1)
+        inside = inside > 0
+        eh = ((np.abs(cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)) / 4 > EDGE_T) & inside).astype(np.float32)
+        ev = ((np.abs(cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)) / 4 > EDGE_T) & inside).astype(np.float32)
+        W, H = small.shape[1], small.shape[0]
+
+        def sharpness(d):
+            M = cv2.getRotationMatrix2D(centre, angle + d, 1.0)
+            rows = cv2.warpAffine(eh, M, (W, H)).sum(axis=1)
+            cols = cv2.warpAffine(ev, M, (W, H)).sum(axis=0)
+            return float((rows ** 2).sum() + (cols ** 2).sum())
+        coarse = max(np.arange(-SKEW_MAX, SKEW_MAX + 1e-6, 0.5), key=sharpness)
+        return float(max(coarse + np.arange(-0.4, 0.41, 0.1), key=sharpness))
 
     def _hsup(self, y, xa, xb):
-        return float(self.eh[int(y), int(xa):int(xb)].mean()) if xb > xa else 0.0
+        y, xa, xb = int(y), int(xa), int(xb)
+        return float(self.hcs[y, xb] - self.hcs[y, xa]) / (xb - xa) if xb > xa else 0.0
 
     def _vsup(self, x, ya, yb):
-        return float(self.ev[int(ya):int(yb), int(x)].mean()) if yb > ya else 0.0
+        x, ya, yb = int(x), int(ya), int(yb)
+        return float(self.vcs[yb, x] - self.vcs[ya, x]) / (yb - ya) if yb > ya else 0.0
 
     def _mat_beside(self, a, b):
         return any(self.pink[s].mean() >= 0.25 or self.flat[s].mean() >= 0.8 for s in (a, b))
@@ -339,8 +406,15 @@ class _Stack:
         """Does a pocket boundary (a near-complete straight line with mat
         beside it) cross the box? Lines in the photo itself (door frames,
         shelves) seldom have flat mat along them."""
-        mx, my, m, e = (r - l) * 0.1, (b - t) * 0.1, 0.15 * self.ppi, self.band
+        mx, my, m, e = (r - l) * 0.1, (b - t) * 0.1, INNER_MARGIN_IN * self.ppi, self.band
         L, R, T, B = int(l), int(r), int(t), int(b)
+        gap = SHINGLE_GAP_IN * self.ppi
+        if self.axis == "h":
+            near = [y for y in self.ys if t + m < y < b - m and self._hsup(y, l + mx, r - mx) >= SHINGLE_LINE]
+        else:
+            near = [x for x in self.xs if l + m < x < r - m and self._vsup(x, t + my, b - my) >= SHINGLE_LINE]
+        if any(q - p < gap for p, q in zip(near, near[1:])):
+            return True   # pocket strips: edges stacked close like shingles
         for y in self.ys:
             if t + m < y < b - m:
                 s = self._hsup(y, l + mx, r - mx)
@@ -377,46 +451,47 @@ class _Stack:
             return False
         if self.pocket_line_inside(*self.blob):
             return True
-        l, r, t, b = self.blob
-        mx, my = (r - l) * 0.1, (b - t) * 0.1
-        shingles = sum(self._hsup(y, l + mx, r - mx) >= 0.5 for y in self.ys) + \
-            sum(self._vsup(x, t + my, b - my) >= 0.5 for x in self.xs)
-        return shingles >= STACK_SHINGLES
+        return self.hshingles + self.vshingles >= STACK_SHINGLES
 
     def _sum(self, ii, l, r, t, b):
         l, r, t, b = int(l), int(r), int(t), int(b)
         return ii[b, r] - ii[t, r] - ii[b, l] + ii[t, l]
 
-    def photos(self):
-        """Boxes of the fully visible photos: four supported sides, no pocket
-        boundary inside, mostly photo content. Best-scoring first, no overlaps."""
+    def candidates(self):
+        """(score, box) for every rectangle that could be a fully visible
+        photo at this angle: four supported sides, at most MAX_MAT_FRAC mat.
+        Score: photo pixels minus penalised mat. Whether a pocket boundary
+        crosses it is checked later, only for boxes that could win."""
         lo, hi = POCKET_MIN_IN * self.ppi, POCKET_MAX_IN * self.ppi
-        cands = []
+        xs = np.array(self.xs, int)
+        out = []
         for i, t in enumerate(self.ys):
             for b in self.ys[i + 1:]:
                 if not lo <= b - t <= hi:
                     continue
                 m = (b - t) * 0.1
-                sides = [x for x in self.xs if self._vsup(x, t + m, b - m) >= SIDE_SUPPORT]
-                for j, l in enumerate(sides):
-                    for r in sides[j + 1:]:
-                        if not lo <= r - l <= hi:
-                            continue
-                        mx = (r - l) * 0.1
-                        if self._hsup(t, l + mx, r - mx) < SIDE_SUPPORT or \
-                                self._hsup(b, l + mx, r - mx) < SIDE_SUPPORT:
-                            continue
-                        box = (l, r, t, b)
-                        if self._sum(self.mat_ii, *box) > MAX_MAT_FRAC * (r - l) * (b - t):
-                            continue
-                        if not self.pocket_line_inside(*box):
-                            cands.append((self._sum(self.score_ii, *box), box))
-        chosen = []
-        for _, (l, r, t, b) in sorted(cands, key=lambda c: -c[0]):
-            if all(min(r, R) - max(l, L) <= 4 or min(b, B) - max(t, T) <= 4
-                   for L, R, T, B in chosen):
-                chosen.append((l, r, t, b))
-        return chosen
+                ya, yb = int(t + m), int(b - m)
+                sides = xs[(self.vcs[yb, xs] - self.vcs[ya, xs]) >= SIDE_SUPPORT * (yb - ya)]
+                if len(sides) < 2:
+                    continue
+                L, R = np.meshgrid(sides, sides, indexing="ij")
+                ok = (R - L >= lo) & (R - L <= hi) & \
+                    (np.minimum(R - L, b - t) <= POCKET_SHORT_MAX_IN * self.ppi)
+                L, R = L[ok], R[ok]
+                mx = (R - L) * 0.1
+                xa, xb = (L + mx).astype(int), (R - mx).astype(int)
+                need = SIDE_SUPPORT * (xb - xa)
+                ok = (self.hcs[t, xb] - self.hcs[t, xa] >= need) & \
+                    (self.hcs[b, xb] - self.hcs[b, xa] >= need)
+                L, R = L[ok], R[ok]
+                ii = self.mat_ii
+                mat = ii[b, R] - ii[t, R] - ii[b, L] + ii[t, L]
+                ok = mat <= MAX_MAT_FRAC * (R - L) * (b - t)
+                L, R = L[ok], R[ok]
+                sc = self.score_ii
+                score = sc[b, R] - sc[t, R] - sc[b, L] + sc[t, L]
+                out += [(float(v), (int(l), int(r), t, b)) for v, l, r in zip(score, L, R)]
+        return out
 
     def to_page(self, box):
         """Straightened-frame box -> rotated rect in detection coordinates."""
@@ -424,14 +499,49 @@ class _Stack:
         c = cv2.invertAffineTransform(self.M) @ np.array([(l + r) / 2, (t + b) / 2, 1.0])
         return (float(c[0]), float(c[1])), (float(r - l), float(b - t)), self.angle
 
-    def leftovers(self, boxes):
-        """Photo content in the stack outside `boxes` that reaches the scan's
-        edge: a photo lying partly off the glass. Thin pocket strips and
-        photos tucked under others away from the edge are ignored."""
+    def trim(self, box):
+        """Pull each side of `box` in past rows/columns that are mostly mat:
+        a pocket edge found where the photo's own edge was too faint."""
+        l, r, t, b = (int(v) for v in box)
+        most, lim = TRIM_MAT_FRAC, int(TRIM_MAX_IN * self.ppi)
+        cols = self.mat[t:b, l:r].mean(axis=0)
+        rows = self.mat[t:b, l:r].mean(axis=1)
+
+        def run(v):
+            # furthest mostly-mat line within reach, if the band it cuts off
+            # is at least half mat (a thin cover edge may lie outside it)
+            v = v[:min(lim, len(v) // 4)]
+            mean = np.cumsum(v) / np.arange(1, len(v) + 1)
+            ok = np.nonzero((v >= most) & (mean >= 0.5))[0]
+            return int(ok[-1]) + 1 if len(ok) else 0
+        return l + run(cols), r - run(cols[::-1]), t + run(rows), b - run(rows[::-1])
+
+    def pocket_line_across(self, rect):
+        """pocket_line_inside() for a rotated rect found at another angle."""
+        c = self.M @ np.array([rect[0][0], rect[0][1], 1.0])
+        (w, h), d = rect[1], 0.1 * self.ppi   # a little inside, for the tilt
+        return self.pocket_line_inside(c[0] - w / 2 + d, c[0] + w / 2 - d,
+                                       c[1] - h / 2 + d, c[1] + h / 2 - d)
+
+    def _solid(self, c):
+        """Has the region a solid core (a photo), not just a frame or strips?"""
+        piece = np.zeros(self.region.shape, np.uint8)
+        cv2.drawContours(piece, [c], 0, 1, -1)
+        k = max(int(UNSURE_CORE_IN * self.ppi), 3)
+        return bool(cv2.erode(piece, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))).any())
+
+    def leftovers(self, taken):
+        """Photo content in the stack outside `taken` (a mask, detection
+        coordinates, of the photos found), as (rect, area, kind): "partly-off"
+        where it reaches the scan's edge (a photo lying partly off the glass),
+        "unsure" where a whole photo's worth was left (its edges weren't clear
+        enough to crop). Thin pocket strips and the uncovered parts of photos
+        tucked under others are ignored."""
         content = (self.region & ~self.plain).astype(np.uint8) * 255
-        pad = int(0.1 * self.ppi)
-        for l, r, t, b in boxes:
-            content[max(int(t) - pad, 0):int(b) + pad, max(int(l) - pad, 0):int(r) + pad] = 0
+        pad = 2 * int(0.1 * self.ppi) + 1
+        H, W = taken.shape
+        taken = cv2.warpAffine(taken, self.M, (W, H), flags=cv2.INTER_NEAREST)
+        content[cv2.dilate(taken, np.ones((pad, pad), np.uint8)) > 0] = 0
         k = max(int(0.4 * self.ppi), 3)
         content = cv2.morphologyEx(content, cv2.MORPH_OPEN, np.ones((k, k), np.uint8))
         cs, _ = cv2.findContours(content, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -443,8 +553,63 @@ class _Stack:
                 continue
             rect = self.to_page((x, x + w, y, y + h))
             if _touches_edge(rect, self.shape):
-                out.append((rect, cv2.contourArea(c)))
+                out.append((rect, cv2.contourArea(c), "partly-off"))
+            elif min(w, h) >= UNSURE_MIN_SIDE_IN * self.ppi and \
+                    cv2.contourArea(c) >= UNSURE_MIN_FILL * w * h and self._solid(c):
+                out.append((rect, cv2.contourArea(c), "unsure"))
         return out
+
+
+def _pocket_photos(small, contour, ppi):
+    """Photos in a pocket stack, or None if the blob isn't one. Each photo
+    sits in its pocket at its own slight tilt, so the search runs at several
+    angles around the stack's own and the best boxes from all of them win.
+    Returns (rects, leftover (rect, area) pairs)."""
+    base = _Stack(small, contour, ppi)
+    if not base.is_stack(_fill(contour)):
+        return None
+    a0 = base.angle + _Stack.skew(small, contour, base.centre, base.angle)
+    cands, stacks = [], []
+    for a in sorted({round(float(v), 2) for v in
+                     np.r_[base.angle, a0 + np.arange(-POCKET_TILT, POCKET_TILT + 1e-6, 0.5)]}):
+        st = _Stack(small, contour, ppi, a, base.axis)
+        stacks.append(st)
+        cands += [(score, st, box) for score, box in st.candidates()]
+    rects = []
+    for _, st, box in sorted(cands, key=lambda c: -c[0]):
+        rect = st.to_page(box)
+        area = rect[1][0] * rect[1][1]
+        if any(_shared(rect, other) > 0.03 * area for other in rects):
+            continue
+        # A pocket edge tilted against this box's angle can look too broken
+        # to count; seen at its own angle it is straight.
+        if any(o.pocket_line_across(rect) for o in stacks
+               if abs(o.angle - rect[2]) <= CROSS_TILT + 1e-6):
+            continue
+        rects.append(rect)
+    rects = [_trim_rect(stacks, r) for r in rects]
+    taken = np.zeros(small.shape[:2], np.uint8)
+    for rect in rects:
+        cv2.fillPoly(taken, [cv2.boxPoints(rect).astype(np.int32)], 1)
+    return rects, base.leftovers(taken)
+
+
+def _trim_rect(stacks, rect):
+    """Trim a chosen photo with the stack searched closest to its angle."""
+    st = min(stacks, key=lambda o: abs(o.angle - rect[2]))
+    c = st.M @ np.array([rect[0][0], rect[0][1], 1.0])
+    (w, h) = rect[1]
+    l, r, t, b = st.trim((c[0] - w / 2, c[0] + w / 2, c[1] - h / 2, c[1] + h / 2))
+    c2 = cv2.invertAffineTransform(st.M) @ np.array([(l + r) / 2, (t + b) / 2, 1.0])
+    return (float(c2[0]), float(c2[1])), (float(r - l), float(b - t)), rect[2]
+
+
+def _shared(r1, r2):
+    """Area two rotated rects have in common."""
+    kind, pts = cv2.rotatedRectangleIntersection(r1, r2)
+    if kind == cv2.INTERSECT_NONE or pts is None or len(pts) < 3:
+        return 0.0
+    return cv2.contourArea(cv2.convexHull(pts))   # the points come unordered
 
 
 def _touches_edge(rect, shape, margin=0.01):
@@ -513,12 +678,12 @@ def find_photos(img, missed=None, recovered=None, pocketed=None):
                 slivers.append(c)
             continue
         if area > STACK_MIN_FRAC * page_area:
-            stack = _Stack(small, c, page_dpi * scale)
-            if stack.is_stack(_fill(c)):
-                boxes = stack.photos()
-                pockets.extend(stack.to_page(b) for b in boxes)
-                for r, a in stack.leftovers(boxes):
-                    extra_missed.append((r, "partly-off", a / page_area, 1.0))
+            found = _pocket_photos(small, c, page_dpi * scale)
+            if found:
+                boxes, rest = found
+                pockets.extend(boxes)
+                for r, a, kind in rest:
+                    extra_missed.append((r, kind, a / page_area, 1.0))
                 if not boxes:
                     extra_missed.append((cv2.minAreaRect(c), "stack", area / page_area, _fill(c)))
                 continue
@@ -838,6 +1003,9 @@ def write_report(out: Path, stamp: str, source: str, kept_at: str, img=None,
             elif m.get("kind") == "partly-off":
                 lines.append("     A photo in a flip album's pocket stack runs off the edge of")
                 lines.append("     the scan: it was probably lying partly off the scanner glass.")
+            elif m.get("kind") == "unsure":
+                lines.append("     A photo in a flip album's pocket stack whose edges weren't")
+                lines.append("     clear enough to crop it safely, so it was left out.")
             elif m.get("kind") == "stack":
                 lines.append("     This looks like a flip album's stack of overlapping pockets,")
                 lines.append("     but no fully visible photo with four clear edges was found")
