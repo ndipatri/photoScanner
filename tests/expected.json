@@ -1972,5 +1972,58 @@
    "partly-off",
    "partly-off"
   ]
+ },
+ "scan-87": {
+  "album": "single 8x10 print, partly off the glass",
+  "note": "A big portrait whose right edge runs off the scan; curtain folds and a jacket edge made it look like a flip-album stack. Must come out as one photo.",
+  "truth": [
+   {
+    "label": "couple portrait",
+    "quad": [
+     [
+      4956,
+      6403
+     ],
+     [
+      318,
+      6403
+     ],
+     [
+      318,
+      521
+     ],
+     [
+      4956,
+      521
+     ]
+    ],
+    "grade": "good"
+   }
+  ],
+  "crops": [
+   {
+    "quad": [
+     [
+      4956,
+      6403
+     ],
+     [
+      318,
+      6403
+     ],
+     [
+      318,
+      521
+     ],
+     [
+      4956,
+      521
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": []
  }
 }

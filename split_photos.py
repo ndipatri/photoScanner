@@ -283,6 +283,8 @@ SHINGLE_GAP_IN = 0.7      # ...this close together are pocket strips, not one ph
 STACK_SHINGLES = 10       # this many long parallel edges across a blob = a stack
 SINGLE_PRINT_MAX_FRAC = 0.9  # bigger than an 8x10 (82% of the glass): the album page itself
 SINGLE_PRINT_SIDES = 0.6  # a big blob straight-edged this well all round is one print
+SINGLE_PRINT_FILL = 0.9   # a "stack" with no photos in it that fills its box this
+                          # well is one big print (e.g. lying partly off the glass)
 
 
 def _longest_run(b):
@@ -719,6 +721,12 @@ def find_photos(img, missed=None, recovered=None, pocketed=None):
             continue
         if area > STACK_MIN_FRAC * page_area:
             found = _pocket_photos(small, c, page_dpi * scale)
+            # A big print lying partly off the glass has no straight edge on
+            # that side, so it can pass for a stack; its inner lines (a door,
+            # a jacket) never make a photo there. If the search found nothing
+            # and the blob is a filled rectangle, it is one print after all.
+            if found and not found[0] and _fill(c) >= SINGLE_PRINT_FILL:
+                found = None
             if found:
                 boxes, rest = found
                 pockets.extend(boxes)
