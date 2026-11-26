@@ -285,6 +285,12 @@ SINGLE_PRINT_MAX_FRAC = 0.9  # bigger than an 8x10 (82% of the glass): the album
 SINGLE_PRINT_SIDES = 0.6  # a big blob straight-edged this well all round is one print
 SINGLE_PRINT_FILL = 0.9   # a "stack" with no photos in it that fills its box this
                           # well is one big print (e.g. lying partly off the glass)
+BIG_PRINT_MIN_IN = 6.5    # a big print (5x7 to 8x10) mounted on an album page
+BIG_PRINT_MAX_IN = 10.5   # may be found inside the page's blob too...
+BIG_PRINT_SIDES = 0.7     # ...if this much of each of its four sides is a straight edge
+BIG_PRINT_MAX_MAT = 0.45  # its pale skies, tablecloths and walls may look like mat
+BIG_PRINT_TRIM = 0.8      # edge strips this full of plain page/mat are cut off it
+PAGE_SAT = 100            # tan album paper is at least this saturated
 
 
 def _longest_run(b):
@@ -363,6 +369,10 @@ class _Stack:
         self.plain = mat | (flat15 & (sat < 40))   # also flat grey: the scanner lid, the page
         self.score_ii = cv2.integral(np.where(mat, -MAT_PENALTY, 1.0))
         self.mat_ii = cv2.integral(mat.astype(np.float64))
+        # Around a big print: mat, or the album page itself (tan paper more
+        # saturated than an old sepia print).
+        self.page = mat | ((hue >= 8) & (hue <= 22) & (sat >= PAGE_SAT) & (val >= 150))
+        self.page_ii = cv2.integral(self.page.astype(np.float64))
         # A print's white border, often yellowed to cream; pink mat is redder.
         white = (val > WHITE_V) & ((sat < WHITE_SAT) | (hue >= CREAM_HUE) & (hue <= 30) & (sat < 120))
         self.white_ii = cv2.integral(white.astype(np.float64))
@@ -485,7 +495,8 @@ class _Stack:
         lo, hi = POCKET_MIN_IN * self.ppi, POCKET_MAX_IN * self.ppi
         flo = min(lo, FRAMED_MIN_IN * self.ppi)
         short_max = POCKET_SHORT_MAX_IN * self.ppi
-        xs = np.array(self.xs, int)
+        big_lo, big_hi = BIG_PRINT_MIN_IN * self.ppi, BIG_PRINT_MAX_IN * self.ppi
+        xs, ys = np.array(self.xs, int), self.ys
         H, W = self.mat.shape
         o1, o2 = max(int(FRAME_FROM_IN * self.ppi), 1), max(int(FRAME_TO_IN * self.ppi), 3)
         wi = self.white_ii
@@ -496,24 +507,34 @@ class _Stack:
             area = np.maximum((x1 - x0) * (y1 - y0), 1)
             return (wi[y1, x1] - wi[y0, x1] - wi[y1, x0] + wi[y0, x0]) / area
         out = []
-        for i, t in enumerate(self.ys):
-            for b in self.ys[i + 1:]:
-                if not flo <= b - t <= hi:
+        for i, t in enumerate(ys):
+            for b in ys[i + 1:]:
+                if not flo <= b - t <= max(hi, big_hi):
                     continue
                 m = (b - t) * 0.1
                 ya, yb = int(t + m), int(b - m)
-                sides = xs[(self.vcs[yb, xs] - self.vcs[ya, xs]) >= SIDE_SUPPORT * (yb - ya)]
+                vsup = (self.vcs[yb, xs] - self.vcs[ya, xs]) / max(yb - ya, 1)
+                keep = vsup >= SIDE_SUPPORT
+                sides, vsup = xs[keep], vsup[keep]
                 if len(sides) < 2:
                     continue
                 L, R = np.meshgrid(sides, sides, indexing="ij")
-                ok = (R - L >= flo) & (R - L <= hi) & (np.minimum(R - L, b - t) <= short_max)
-                L, R = L[ok], R[ok]
+                VL, VR = np.meshgrid(vsup, vsup, indexing="ij")
+                w, h = R - L, b - t
+                pocket = (w >= flo) & (w <= hi) & (h <= hi) & (np.minimum(w, h) <= short_max)
+                # A big print (an 8x10) mounted on an album page: far bigger
+                # than a pocket photo, so its whole outline must be clean.
+                big = (np.minimum(w, h) >= big_lo) & (np.maximum(w, h) <= big_hi) & \
+                    (np.minimum(VL, VR) >= BIG_PRINT_SIDES)
+                ok = pocket | big
+                L, R, big = L[ok], R[ok], big[ok]
                 mx = (R - L) * 0.1
                 xa, xb = (L + mx).astype(int), (R - mx).astype(int)
-                need = SIDE_SUPPORT * (xb - xa)
-                ok = (self.hcs[t, xb] - self.hcs[t, xa] >= need) & \
-                    (self.hcs[b, xb] - self.hcs[b, xa] >= need)
-                L, R = L[ok], R[ok]
+                st = (self.hcs[t, xb] - self.hcs[t, xa]) / np.maximum(xb - xa, 1)
+                sb = (self.hcs[b, xb] - self.hcs[b, xa]) / np.maximum(xb - xa, 1)
+                big &= np.minimum(st, sb) >= BIG_PRINT_SIDES
+                ok = (np.minimum(st, sb) >= SIDE_SUPPORT) & ((R - L <= hi) & (b - t <= hi) | big)
+                L, R, big = L[ok], R[ok], big[ok]
                 # A print with a white border all round (stuck on an album
                 # page) may be smaller and may hold pale or pink areas; a
                 # photo in a pocket has no such frame and keeps the strict rules.
@@ -527,12 +548,18 @@ class _Stack:
                 ii = self.mat_ii
                 mat = ii[b, R] - ii[t, R] - ii[b, L] + ii[t, L]
                 area = (R - L) * (b - t)
-                ok = (sized & (mat <= MAX_MAT_FRAC * area)) | (framed & (mat <= FRAMED_MAX_MAT * area))
-                L, R, framed = L[ok], R[ok], framed[ok]
+                ok = ((sized & (mat <= MAX_MAT_FRAC * area)) | (framed & (mat <= FRAMED_MAX_MAT * area)) | \
+                    (big & (mat <= BIG_PRINT_MAX_MAT * area)))
+                L, R, framed, big = L[ok], R[ok], framed[ok], big[ok]
                 sc = self.score_ii
                 score = sc[b, R] - sc[t, R] - sc[b, L] + sc[t, L]
+                # A big print's pale areas are mostly its own: count them
+                # once against it (photo minus pale and page), not MAT_PENALTY times.
+                pg = self.page_ii
+                page = pg[b, R] - pg[t, R] - pg[b, L] + pg[t, L]
+                score = np.where(big, (b - t) * (R - L) - 2 * page, score)
                 out += [(float(v), (int(l), int(r), t, b), bool(f))
-                        for v, l, r, f in zip(score, L, R, framed)]
+                        for v, l, r, f in zip(score, L, R, framed | big)]
         return out
 
     def to_page(self, box):
@@ -543,11 +570,16 @@ class _Stack:
 
     def trim(self, box):
         """Pull each side of `box` in past rows/columns that are mostly mat:
-        a pocket edge found where the photo's own edge was too faint."""
+        a pocket edge found where the photo's own edge was too faint. A big
+        print also loses edge strips that are almost all plain page (the tan
+        paper beside it, which isn't always flat enough to count as mat)."""
         l, r, t, b = (int(v) for v in box)
         most, lim = TRIM_MAT_FRAC, int(TRIM_MAX_IN * self.ppi)
-        cols = self.mat[t:b, l:r].mean(axis=0)
-        rows = self.mat[t:b, l:r].mean(axis=1)
+        plain = self.mat
+        if min(r - l, b - t) >= BIG_PRINT_MIN_IN * self.ppi:
+            plain, most = self.page, BIG_PRINT_TRIM
+        cols = plain[t:b, l:r].mean(axis=0)
+        rows = plain[t:b, l:r].mean(axis=1)
 
         def run(v):
             # furthest mostly-mat line within reach, if the band it cuts off

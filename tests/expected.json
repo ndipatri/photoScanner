@@ -2025,5 +2025,142 @@
    }
   ],
   "missed": []
+ },
+ "scan-134": {
+  "album": "8x10 print mounted on a punched tan album page",
+  "note": "Same page as scan-136, with the print touching the left edge of the glass: no left edge line, so it still comes out cut in half (known limit; rescanned as scan-136).",
+  "crops": [
+   {
+    "quad": [
+     [
+      863,
+      2544
+     ],
+     [
+      842,
+      84
+     ],
+     [
+      4603,
+      52
+     ],
+     [
+      4625,
+      2511
+     ]
+    ],
+    "turn": 270,
+    "cut_off": false
+   }
+  ],
+  "missed": [
+   "unsure"
+  ]
+ },
+ "scan-135": {
+  "album": "8x10 print mounted on a punched tan album page",
+  "note": "One big print on a tan page with binder holes; the page made it look like a flip-album stack and inner lines (window frames, curtains) cut it in half. Must come out as one photo.",
+  "crops": [
+   {
+    "quad": [
+     [
+      17,
+      6022
+     ],
+     [
+      17,
+      132
+     ],
+     [
+      4733,
+      132
+     ],
+     [
+      4733,
+      6022
+     ]
+    ],
+    "turn": 0,
+    "cut_off": false
+   }
+  ],
+  "missed": [],
+  "truth": [
+   {
+    "label": "wedding dinner print",
+    "quad": [
+     [
+      17,
+      6022
+     ],
+     [
+      17,
+      132
+     ],
+     [
+      4733,
+      132
+     ],
+     [
+      4733,
+      6022
+     ]
+    ],
+    "grade": "good"
+   }
+  ]
+ },
+ "scan-136": {
+  "album": "8x10 print mounted on a punched tan album page",
+  "note": "One big print on a tan page with binder holes; the page made it look like a flip-album stack and inner lines (window frames, curtains) cut it in half. Must come out as one photo.",
+  "crops": [
+   {
+    "quad": [
+     [
+      95,
+      6039
+     ],
+     [
+      95,
+      79
+     ],
+     [
+      4745,
+      79
+     ],
+     [
+      4745,
+      6039
+     ]
+    ],
+    "turn": 270,
+    "cut_off": false
+   }
+  ],
+  "missed": [],
+  "truth": [
+   {
+    "label": "wedding dinner print",
+    "quad": [
+     [
+      95,
+      6039
+     ],
+     [
+      95,
+      79
+     ],
+     [
+      4745,
+      79
+     ],
+     [
+      4745,
+      6039
+     ]
+    ],
+    "grade": "good"
+   }
+  ]
  }
 }
