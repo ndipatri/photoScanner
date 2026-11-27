@@ -289,7 +289,8 @@ BIG_PRINT_MIN_IN = 6.5    # a big print (5x7 to 8x10) mounted on an album page
 BIG_PRINT_MAX_IN = 10.5   # may be found inside the page's blob too...
 BIG_PRINT_SIDES = 0.7     # ...if this much of each of its four sides is a straight edge
 BIG_PRINT_MAX_MAT = 0.45  # its pale skies, tablecloths and walls may look like mat
-BIG_PRINT_TRIM = 0.8      # edge strips this full of plain page/mat are cut off it
+BIG_PRINT_TRIM = 0.8      # edge strips this full of plain page/mat are cut off it,
+BIG_PRINT_TRIM_IN = 0.2   # up to this much per side
 PAGE_SAT = 100            # tan album paper is at least this saturated
 
 
@@ -426,12 +427,14 @@ class _Stack:
     def _mat_beside(self, a, b):
         return any(self.pink[s].mean() >= 0.25 or self.flat[s].mean() >= 0.8 for s in (a, b))
 
-    def pocket_line_inside(self, l, r, t, b, both_ways=True):
+    def pocket_line_inside(self, l, r, t, b, both_ways=True, big=False):
         """Does a pocket boundary (a near-complete straight line with mat
         beside it) cross the box? Lines in the photo itself (door frames,
         shelves) seldom have flat mat along them. Unless `both_ways`, only
         lines running the same way as the stack's strips count: a door frame
-        or tree trunk across them is part of a photo."""
+        or tree trunk across them is part of a photo. A `big` print (an 8x10)
+        is far bigger than any pocket: only a line with mat beside it counts,
+        not porch steps or pillars that are merely long and straight."""
         mx, my, m, e = (r - l) * 0.1, (b - t) * 0.1, INNER_MARGIN_IN * self.ppi, self.band
         L, R, T, B = int(l), int(r), int(t), int(b)
         gap = SHINGLE_GAP_IN * self.ppi
@@ -439,20 +442,20 @@ class _Stack:
             near = [y for y in self.ys if t + m < y < b - m and self._hsup(y, l + mx, r - mx) >= SHINGLE_LINE]
         else:
             near = [x for x in self.xs if l + m < x < r - m and self._vsup(x, t + my, b - my) >= SHINGLE_LINE]
-        if any(q - p < gap for p, q in zip(near, near[1:])):
+        if not big and any(q - p < gap for p, q in zip(near, near[1:])):
             return True   # pocket strips: edges stacked close like shingles
         h_ok = both_ways or self.axis == "h"
         v_ok = both_ways or self.axis == "v"
         for y in (self.ys if h_ok else ()):
             if t + m < y < b - m:
                 s = self._hsup(y, l + mx, r - mx)
-                if s >= CLEAN_LINE or s >= POCKET_LINE and self._mat_beside(
+                if s >= CLEAN_LINE and not big or s >= POCKET_LINE and self._mat_beside(
                         (slice(y - e, y - 2), slice(L, R)), (slice(y + 2, y + e), slice(L, R))):
                     return True
         for x in (self.xs if v_ok else ()):
             if l + m < x < r - m:
                 s = self._vsup(x, t + my, b - my)
-                if s >= CLEAN_LINE or s >= POCKET_LINE and self._mat_beside(
+                if s >= CLEAN_LINE and not big or s >= POCKET_LINE and self._mat_beside(
                         (slice(T, B), slice(x - e, x - 2)), (slice(T, B), slice(x + 2, x + e))):
                     return True
         return False
@@ -577,7 +580,10 @@ class _Stack:
         most, lim = TRIM_MAT_FRAC, int(TRIM_MAX_IN * self.ppi)
         plain = self.mat
         if min(r - l, b - t) >= BIG_PRINT_MIN_IN * self.ppi:
+            # only a thin strip: a big print's own pale walls and skies
+            # look like page too, and cutting them took people's heads off
             plain, most = self.page, BIG_PRINT_TRIM
+            lim = int(BIG_PRINT_TRIM_IN * self.ppi)
         cols = plain[t:b, l:r].mean(axis=0)
         rows = plain[t:b, l:r].mean(axis=1)
 
@@ -594,8 +600,9 @@ class _Stack:
         """pocket_line_inside() for a rotated rect found at another angle."""
         c = self.M @ np.array([rect[0][0], rect[0][1], 1.0])
         (w, h), d = rect[1], 0.1 * self.ppi   # a little inside, for the tilt
+        big = min(w, h) >= BIG_PRINT_MIN_IN * self.ppi
         return self.pocket_line_inside(c[0] - w / 2 + d, c[0] + w / 2 - d,
-                                       c[1] - h / 2 + d, c[1] + h / 2 - d, both_ways)
+                                       c[1] - h / 2 + d, c[1] + h / 2 - d, both_ways, big)
 
     def _solid(self, c):
         """Has the region a solid core (a photo), not just a frame or strips?"""

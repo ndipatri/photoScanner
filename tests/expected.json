@@ -2162,5 +2162,111 @@
     "grade": "good"
    }
   ]
+ },
+ "scan-139": {
+  "album": "8x10 print mounted on a punched tan album page",
+  "note": "One big print on a tan page with binder holes. Pale walls along its edge were trimmed off as if they were page (heads cut off, 140), and porch steps and pillars looked like pocket edges, so a smaller box won (139). Must come out whole.",
+  "crops": [
+   {
+    "quad": [
+     [
+      99,
+      6014
+     ],
+     [
+      99,
+      107
+     ],
+     [
+      4778,
+      107
+     ],
+     [
+      4778,
+      6014
+     ]
+    ],
+    "turn": 270,
+    "cut_off": false
+   }
+  ],
+  "missed": [],
+  "truth": [
+   {
+    "label": "wedding party on the porch steps",
+    "quad": [
+     [
+      99,
+      6014
+     ],
+     [
+      99,
+      107
+     ],
+     [
+      4778,
+      107
+     ],
+     [
+      4778,
+      6014
+     ]
+    ],
+    "grade": "good"
+   }
+  ]
+ },
+ "scan-140": {
+  "album": "8x10 print mounted on a punched tan album page",
+  "note": "One big print on a tan page with binder holes. Pale walls along its edge were trimmed off as if they were page (heads cut off, 140), and porch steps and pillars looked like pocket edges, so a smaller box won (139). Must come out whole.",
+  "crops": [
+   {
+    "quad": [
+     [
+      81,
+      6179
+     ],
+     [
+      132,
+      322
+     ],
+     [
+      4674,
+      362
+     ],
+     [
+      4623,
+      6219
+     ]
+    ],
+    "turn": 90,
+    "cut_off": false
+   }
+  ],
+  "missed": [],
+  "truth": [
+   {
+    "label": "bride and groom with a plate",
+    "quad": [
+     [
+      81,
+      6179
+     ],
+     [
+      132,
+      322
+     ],
+     [
+      4674,
+      362
+     ],
+     [
+      4623,
+      6219
+     ]
+    ],
+    "grade": "good"
+   }
+  ]
  }
 }
